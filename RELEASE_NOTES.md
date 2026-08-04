@@ -1,4 +1,4 @@
-# unroot 1.0.0
+# Unroot 1.0.0
 
 **Initial Release** — August 2026
 

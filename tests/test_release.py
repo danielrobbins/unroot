@@ -39,6 +39,14 @@ Earlier release.
     assert release.extract_notes(text, "1.0_beta1") == "Current release.\n"
 
 
+def test_current_release_notes_match_version():
+    root = Path(__file__).parents[1]
+    version = (root / "VERSION").read_text(encoding="ascii").strip()
+    notes = (root / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+
+    assert release.extract_notes(notes, version)
+
+
 def test_checksums_require_and_hash_complete_architecture_set(tmp_path):
     metadata = release.release_metadata("1.0_beta1")
     contents = {"x86_64": b"x86 artifact", "arm64": b"arm artifact"}
