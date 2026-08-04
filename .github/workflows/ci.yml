@@ -142,13 +142,20 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Build the strict public snapshot
+      - name: Build the Docker qualification image
         run: |
-          python3 scripts/export_public.py "${RUNNER_TEMP}/unroot-public" --strict
+          snapshot="${RUNNER_TEMP}/unroot-public"
+          repo_name="${GITHUB_REPOSITORY##*/}"
+          if [[ "${repo_name}" == unroot ]]; then
+            mkdir "${snapshot}"
+            git archive HEAD | tar -x -C "${snapshot}"
+          else
+            python3 scripts/export_public.py "${snapshot}" --strict
+          fi
           docker build \
-            --file "${RUNNER_TEMP}/unroot-public/tests/containers/Dockerfile" \
+            --file "${snapshot}/tests/containers/Dockerfile" \
             --tag unroot-e2e \
-            "${RUNNER_TEMP}/unroot-public"
+            "${snapshot}"
       - name: Allow host user namespaces
         run: |
           if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
