@@ -1,0 +1,687 @@
+{
+  "schema": "docatoms/v1",
+  "atoms": {
+    "tool:unroot": {
+      "kind": "tool",
+      "name": "unroot",
+      "title": "unroot",
+      "short_help": "unroot - enter, run, and transport Linux root filesystems",
+      "syntax": "",
+      "description": "`unroot` is a small, daemonless tool for trusted build, packaging, cross-architecture, and rootfs-maintenance work. It combines Linux namespaces, durable ownership metadata, and optional QEMU user-mode emulation without requiring a resident container service.\n\nRoot filesystem ownership is explicit:\n\n* A *managed rootfs* created by `unroot unpack` uses a rich subordinate UID and GID map by default. It preserves normal multi-user ownership while ordinary entry remains unprivileged.\n* A *native rootfs* uses host ownership directly. Create one with `sudo unroot unpack --native`, or explicitly enter an existing host-owned or mounted rootfs with `sudo unroot enter --native`.\n* `unroot single` does not enter a rootfs. It gives one command namespace root capabilities while leaving the host filesystem visible.\n\nThese modes are intentionally not fallbacks for one another. A multi-user rootfs is never silently reduced to one identity, and a request for unprivileged operation never silently becomes a host-root operation.\n\nIn practical terms, `unroot` supports several useful workflows:\n\n* *Zero-configuration build isolation.* `unroot single` places a trusted source build inside private user, mount, and PID namespaces without requiring a rootfs image, daemon, or project-specific container configuration. The host filesystem and network remain available, so this is a clean namespace boundary for normal build work rather than a security sandbox for hostile code.\n* *A sudo-less chroot.* Configure subordinate IDs once, create a rootfs with `unroot unpack`, and enter it later without `sudo`. UID and GID 0 map to the invoking user; the remaining rootfs identities map to the user's subordinate ranges.\n* *A direct chroot replacement.* `--native` operates on ordinary host-owned filesystems, NFS-mounted root filesystems, and disposable VM roots without shifting ownership. It requires host root privileges because it deliberately does not create a user namespace.\n* *Cross-architecture development.* Enter ARM64 from x86-64, x86-64 from ARM64, or RISC-V from either. `unroot` inspects the requested executable or shebang interpreter and connects it to the matching static QEMU user-mode emulator.\n* *Portable rootfs workflows.* `unpack` restores a complete rootfs under its chosen ownership model; `pack` captures it again while preserving numeric owners and extended filesystem metadata.\n* *Single-process rootfs execution.* Run one command with a different `/` and private PID and mount state, with no resident container daemon. This is useful for trusted services, build steps, and maintenance tools.\n* *Architecture and distribution testing.* Keep a collection of rootfs archives and exercise software against multiple Linux environments without booting a VM for each one.",
+      "metadata": {
+        "title": "unroot",
+        "priority": "0"
+      }
+    },
+    "topic:synopsis": {
+      "kind": "topic",
+      "name": "synopsis",
+      "title": "SYNOPSIS",
+      "short_help": "SYNOPSIS",
+      "syntax": "",
+      "description": "```text\nunroot unpack ARCHIVE ROOT\nsudo unroot unpack --native ARCHIVE ROOT\nunroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nsudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot single [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot pack ROOT ARCHIVE\n```",
+      "metadata": {
+        "priority": "10"
+      }
+    },
+    "topic:quick-start": {
+      "kind": "topic",
+      "name": "quick-start",
+      "title": "QUICK START",
+      "short_help": "QUICK START",
+      "syntax": "",
+      "description": "Create a faithful multi-user rootfs from an archive, then enter it:\n\n```console\n$ unroot unpack alpine.tar.zst ~/rootfs\n$ unroot enter ~/rootfs\n```\n\n`unpack` requires subordinate UID and GID allocations. It checks the allocation and mapping helpers before creating *ROOT*, so an incomplete host setup does not leave behind a partially initialized destination.\n\nRun a specific command with an explicit environment:\n\n```console\n$ unroot enter ~/rootfs \\\n    --cwd /build \\\n    --env PATH=/bin:/usr/bin \\\n    --env MAKEFLAGS=-j8 \\\n    -- make\n```\n\nEnter an existing host-owned or NFS-mounted Raspberry Pi rootfs from an x86-64 workstation:\n\n```console\n$ sudo unroot enter --native /mnt/raspi4-root -- /bin/sh\n```\n\nThe explicit `--native` selects host ownership and authorizes any host-global foreign-execution setup required for this boot. The rootfs is not modified with Unroot metadata merely because it was entered.\n\nUse single-identity namespace capabilities without changing the filesystem root:\n\n```console\n$ unroot single -- /usr/bin/id\n```\n\nCapture a managed rootfs after modifying it:\n\n```console\n$ unroot pack ~/rootfs alpine-modified.tar.zst\n```\n\nThe archive is host-independent, while its binaries retain the rootfs's target architecture. On another supported Linux host, `unroot` either runs them natively or selects the matching QEMU emulator.",
+      "metadata": {
+        "priority": "20"
+      }
+    },
+    "topic:rootfs-archives": {
+      "kind": "topic",
+      "name": "rootfs-archives",
+      "title": "ROOTFS ARCHIVES",
+      "short_help": "ROOTFS ARCHIVES",
+      "syntax": "",
+      "description": "`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.\n\n`sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.\n\nBoth forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. A conflicting requested mode is rejected.\n\n`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.\n\nBoth actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.\n\nUnpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host-capability checks complete before *ROOT* is created or modified.",
+      "metadata": {
+        "priority": "30"
+      }
+    },
+    "section:execution-model": {
+      "kind": "section",
+      "name": "execution-model",
+      "title": "EXECUTION MODEL",
+      "short_help": "EXECUTION MODEL",
+      "syntax": "",
+      "description": "",
+      "metadata": {
+        "priority": "40"
+      }
+    },
+    "topic:command-selection": {
+      "kind": "topic",
+      "name": "command-selection",
+      "title": "Command selection",
+      "short_help": "Command selection",
+      "syntax": "",
+      "description": "Absolute commands are interpreted inside the selected root filesystem. Commands containing a slash are executed relative to `--cwd`, or `/` in rooted mode when no working directory is specified.\n\nA bare command name requires `PATH` to be selected explicitly with `--env` or `--persist-env`. This avoids an implicit host or C library search path in a reproducible build environment.\n\nScripts are supported. For architecture detection, `unroot` follows the script's shebang and inspects the actual interpreter rather than assuming that the requested file is an ELF executable.\n\nIf no command is supplied, rooted and single modes run `/bin/sh`.",
+      "metadata": {
+        "parent": "section:execution-model",
+        "priority": "10"
+      }
+    },
+    "topic:environment": {
+      "kind": "topic",
+      "name": "environment",
+      "title": "Environment",
+      "short_help": "Environment",
+      "syntax": "",
+      "description": "The target command does not inherit the host environment by default. Add or replace a value with repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.",
+      "metadata": {
+        "parent": "section:execution-model",
+        "priority": "20"
+      }
+    },
+    "topic:ownership-model": {
+      "kind": "topic",
+      "name": "ownership-model",
+      "title": "Rootfs ownership",
+      "short_help": "Rootfs ownership",
+      "syntax": "",
+      "description": "A managed rootfs has an authoritative ownership record in `.unroot/meta.json`:\n\n* *Rich ownership* uses a user namespace. Rootfs ID 0 maps to the invoking host user, and one contiguous subordinate range represents IDs 1 through 65535. `unroot unpack` creates this mode by default.\n* *Native ownership* uses host IDs unchanged and does not create a user namespace. `sudo unroot unpack --native` creates this mode.\n\n`unroot enter ROOT` reads the stored mode before namespace creation. A rich root must still belong to the same host UID and GID, and its exact subordinate ranges must remain assigned. A native root requires host root privileges. Unroot never silently chooses a replacement map, rewrites ownership, or changes modes.\n\nAn existing rootfs with no metadata is not guessed. Use `sudo unroot enter --native ROOT` to state that its host-visible ownership is intentional. This unmanaged entry does not create `.unroot` metadata. Use `unroot unpack` when a portable managed rootfs is desired.\n\n`unroot single` is separate from both rooted modes. It maps only the invoking UID and GID to namespace ID 0 for the current invocation and leaves the host filesystem visible. It is useful for build isolation but cannot faithfully represent a multi-user rootfs.\n\nRich ownership requires suitable subordinate-ID allocations and the `unroot-util`, `newuidmap`, and `newgidmap` helpers. `unroot-util` must be installed beside `unroot`. When built with libsubid, it uses the host's configured subordinate-ID provider; otherwise it reads `/etc/subuid` and `/etc/subgid` directly. The initial release requires one contiguous subordinate UID range and one contiguous subordinate GID range of at least 65535 IDs.",
+      "metadata": {
+        "parent": "section:execution-model",
+        "priority": "30"
+      }
+    },
+    "topic:filesystem-setup": {
+      "kind": "topic",
+      "name": "filesystem-setup",
+      "title": "Filesystem setup",
+      "short_help": "Filesystem setup",
+      "syntax": "",
+      "description": "Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `MOUNT FEATURES`. Both rich and native entry retain private mount and PID namespaces.\n\n`--map` bind-mounts an absolute host path at the same absolute path inside the root filesystem. `--map-ro` accepts *SOURCE:DESTINATION* and requires the resulting bind mount to be read-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to `enter`.\n\n`single` keeps the host filesystem visible and avoids creating or replacing host mount targets. Its optional `/proc` work occurs only in the private mount namespace.",
+      "metadata": {
+        "parent": "section:execution-model",
+        "priority": "40"
+      }
+    },
+    "topic:foreign-execution": {
+      "kind": "topic",
+      "name": "foreign-execution",
+      "title": "Foreign-architecture execution",
+      "short_help": "Foreign-architecture execution",
+      "syntax": "",
+      "description": "`unroot` compares the requested executable's ELF architecture with the host and selects the conventional static QEMU user-mode emulator when they differ. The executable or resolved shebang interpreter is authoritative; Unroot does not maintain distro subarchitecture profiles, choose compiler flags, or select rootfs variants.\n\nRich roots use a private `binfmt_misc` instance. Unroot stages the static emulator and its own wrapper beneath `.unroot/bin`, registers the target architecture only inside the new namespace, and removes the entire registration naturally when the namespace exits. `--qemu-cpu` is available here for an explicit QEMU CPU and feature specification.\n\nNative roots use host `binfmt_misc`, because there is no user namespace in which to create a private instance. On foreign entry, Unroot first reuses any enabled fixed-interpreter handler with the exact target ELF magic and mask. If none exists, it registers a handler named `unroot-ARCH` using a trusted, root-owned, non-writable static QEMU from standard system directories. The registration uses the kernel's fix-binary behavior so the interpreter remains available after `chroot`, and remains active for the current boot. Unroot refuses to replace a conflicting handler.\n\nAn explicit `--qemu` used with native mode must resolve to a trusted absolute path whose file and parent hierarchy are root-owned and not group- or other-writable. Native mode does not accept `--qemu-cpu`, because a host-global registration cannot safely carry per-rootfs CPU policy. Rootfs metadata never supplies a host emulator path or raw registration string.\n\nUse `--emulation never` when foreign execution must fail rather than start QEMU. QEMU overrides apply only when the target architecture differs from the host. Unroot includes ELF class and byte order in target identity and rejects recognized but unsupported combinations rather than choosing an approximate emulator.\n\nPrivate `binfmt_misc` instances require Linux 6.7 or newer and permission from the surrounding runtime. Native foreign execution works on older kernels that support ordinary host `binfmt_misc`, but requires host root privileges to mount or register it when no compatible handler already exists.",
+      "metadata": {
+        "parent": "section:execution-model",
+        "priority": "50"
+      }
+    },
+    "topic:security-model": {
+      "kind": "topic",
+      "name": "security-model",
+      "title": "SECURITY MODEL",
+      "short_help": "SECURITY MODEL",
+      "syntax": "",
+      "description": "`unroot` is intended for root filesystems and commands that you trust. It is not a sandbox for hostile code.\n\nRich roots and `single` use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.\n\nEvery mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.\n\nExplicit bind mappings and selected resolver or device resources remain backed by host resources. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.",
+      "metadata": {
+        "priority": "50"
+      }
+    },
+    "section:options": {
+      "kind": "section",
+      "name": "options",
+      "title": "OPTIONS",
+      "short_help": "OPTIONS",
+      "syntax": "",
+      "description": "",
+      "metadata": {
+        "priority": "60"
+      }
+    },
+    "option:enter.native": {
+      "kind": "option",
+      "name": "enter.native",
+      "title": "--native",
+      "short_help": "--native",
+      "syntax": "--native",
+      "description": "Enter an unmanaged host-owned rootfs, or create a native rootfs with `unpack`. Requires host root privileges. It conflicts with a managed rich ownership record.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "10"
+      }
+    },
+    "option:process.cwd": {
+      "kind": "option",
+      "name": "process.cwd",
+      "title": "--cwd DIRECTORY",
+      "short_help": "--cwd DIRECTORY",
+      "syntax": "--cwd DIRECTORY",
+      "description": "Set the command's working directory. With `enter`, the path is interpreted inside *ROOT*; with `single`, it is interpreted in the visible host filesystem.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "20"
+      }
+    },
+    "option:process.env": {
+      "kind": "option",
+      "name": "process.env",
+      "title": "--env KEY=VALUE",
+      "short_help": "--env KEY=VALUE",
+      "syntax": "--env KEY=VALUE",
+      "description": "Set an environment variable for the target command. May be repeated.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "30"
+      }
+    },
+    "option:process.persist-env": {
+      "kind": "option",
+      "name": "process.persist-env",
+      "title": "--persist-env NAMES",
+      "short_help": "--persist-env NAMES",
+      "syntax": "--persist-env NAMES",
+      "description": "Copy a comma-separated list of variables from the host environment.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "40"
+      }
+    },
+    "option:enter.map": {
+      "kind": "option",
+      "name": "enter.map",
+      "title": "--map PATH",
+      "short_help": "--map PATH",
+      "syntax": "--map PATH",
+      "description": "Bind an absolute host path at the same path inside *ROOT*. May be repeated.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "50"
+      }
+    },
+    "option:enter.map-ro": {
+      "kind": "option",
+      "name": "enter.map-ro",
+      "title": "--map-ro SOURCE:DESTINATION",
+      "short_help": "--map-ro SOURCE:DESTINATION",
+      "syntax": "--map-ro SOURCE:DESTINATION",
+      "description": "Bind an absolute host path at an absolute destination inside *ROOT*, then make that mount and any nested mounts read-only. May be repeated.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "60"
+      }
+    },
+    "option:enter.emulation": {
+      "kind": "option",
+      "name": "enter.emulation",
+      "title": "--emulation MODE",
+      "short_help": "--emulation MODE",
+      "syntax": "--emulation MODE",
+      "description": "Set the foreign-execution policy. `auto`, the default, uses a static QEMU user-mode emulator when the target ELF architecture differs from the host. `never` rejects a foreign target instead.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "70"
+      }
+    },
+    "option:enter.qemu": {
+      "kind": "option",
+      "name": "enter.qemu",
+      "title": "--qemu PATH",
+      "short_help": "--qemu PATH",
+      "syntax": "--qemu PATH",
+      "description": "Use the specified static QEMU user-mode emulator for foreign execution. Rich mode may use an executable path or a name on the host `PATH`. Native mode requires a trusted root-owned system path. The emulator itself must be executable by the host architecture.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "80"
+      }
+    },
+    "option:enter.qemu-cpu": {
+      "kind": "option",
+      "name": "enter.qemu-cpu",
+      "title": "--qemu-cpu SPEC",
+      "short_help": "--qemu-cpu SPEC",
+      "syntax": "--qemu-cpu SPEC",
+      "description": "Pass `-cpu` *SPEC* to QEMU for private rich-mode foreign execution. The specification may be a model alone or a model followed by QEMU feature properties, such as `max,sve=on,sve256=on`. Native mode rejects this option because its QEMU handler is host-global.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "90"
+      }
+    },
+    "option:global.help": {
+      "kind": "option",
+      "name": "global.help",
+      "title": "--help, -h",
+      "short_help": "--help, -h",
+      "syntax": "--help, -h",
+      "description": "Show help for the selected action.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "100"
+      }
+    },
+    "option:global.debug": {
+      "kind": "option",
+      "name": "global.debug",
+      "title": "--debug",
+      "short_help": "--debug",
+      "syntax": "--debug",
+      "description": "The global `--debug` option must precede the action and enables structured diagnostic logging:\n\n```console\n$ unroot --debug enter ~/rootfs -- /bin/true\n```",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "110"
+      }
+    },
+    "option:global.version": {
+      "kind": "option",
+      "name": "global.version",
+      "title": "--version, -V",
+      "short_help": "--version, -V",
+      "syntax": "--version, -V",
+      "description": "Print the Unroot version.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "120"
+      }
+    },
+    "section:mount-features": {
+      "kind": "section",
+      "name": "mount-features",
+      "title": "MOUNT FEATURES",
+      "short_help": "MOUNT FEATURES",
+      "syntax": "",
+      "description": "",
+      "metadata": {
+        "priority": "70"
+      }
+    },
+    "topic:mount-features-overview": {
+      "kind": "topic",
+      "name": "mount-features-overview",
+      "title": "Feature selection",
+      "short_help": "Feature selection",
+      "syntax": "",
+      "description": "`UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.\n\nRooted mode enables `resolvconf`, `hosts`, `devpts`, `shm`, `run`, and `mtab` by default. `single` disables `shm` and `run` by default to avoid over-mounting visible host paths. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.\n\nFor example, this disables resolver sharing and enables the full device bind:\n\n```console\n$ UNROOT_FEATURES=-resolvconf,+devbind unroot enter ~/rootfs\n```",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "0"
+      }
+    },
+    "feature:resolvconf": {
+      "kind": "feature",
+      "name": "resolvconf",
+      "title": "resolvconf",
+      "short_help": "resolvconf",
+      "syntax": "resolvconf",
+      "description": "Bind the host `/etc/resolv.conf` into the root filesystem.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "10"
+      }
+    },
+    "feature:hosts": {
+      "kind": "feature",
+      "name": "hosts",
+      "title": "hosts",
+      "short_help": "hosts",
+      "syntax": "hosts",
+      "description": "Bind the host `/etc/hosts` into the root filesystem.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "20"
+      }
+    },
+    "feature:devpts": {
+      "kind": "feature",
+      "name": "devpts",
+      "title": "devpts",
+      "short_help": "devpts",
+      "syntax": "devpts",
+      "description": "Mount a private `/dev/pts` for pseudo-terminal support.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "30"
+      }
+    },
+    "feature:shm": {
+      "kind": "feature",
+      "name": "shm",
+      "title": "shm",
+      "short_help": "shm",
+      "syntax": "shm",
+      "description": "Mount a private `tmpfs` at `/dev/shm`.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "40"
+      }
+    },
+    "feature:run": {
+      "kind": "feature",
+      "name": "run",
+      "title": "run",
+      "short_help": "run",
+      "syntax": "run",
+      "description": "Mount a private `tmpfs` at `/run`.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "50"
+      }
+    },
+    "feature:mtab": {
+      "kind": "feature",
+      "name": "mtab",
+      "title": "mtab",
+      "short_help": "mtab",
+      "syntax": "mtab",
+      "description": "Create `/etc/mtab` as a link to `/proc/self/mounts` when it is absent.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "60"
+      }
+    },
+    "feature:devbind": {
+      "kind": "feature",
+      "name": "devbind",
+      "title": "devbind",
+      "short_help": "devbind",
+      "syntax": "devbind",
+      "description": "Bind the complete host `/dev` tree into the root filesystem.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "70"
+      }
+    },
+    "topic:diagnostics": {
+      "kind": "topic",
+      "name": "diagnostics",
+      "title": "DIAGNOSTICS",
+      "short_help": "DIAGNOSTICS",
+      "syntax": "",
+      "description": "When namespace creation or setup is denied, `unroot` reports the failed operation, system error, and observable policy context. This includes disabled user-namespace sysctls, AppArmor's unprivileged-user-namespace restriction, an enforcing SELinux context, seccomp state, and an outer-container policy hint when available.\n\nRich preflight errors identify missing subordinate allocations, `unroot-util`, `newuidmap`, or `newgidmap` before the destination rootfs is created. Native-mode errors distinguish missing host root privileges, conflicting metadata, unavailable trusted QEMU, and conflicting `binfmt_misc` handlers.\n\nUse the global `--debug` option for detailed structured setup events.",
+      "metadata": {
+        "priority": "80"
+      }
+    },
+    "topic:exit-status": {
+      "kind": "topic",
+      "name": "exit-status",
+      "title": "EXIT STATUS",
+      "short_help": "EXIT STATUS",
+      "syntax": "",
+      "description": "After successful setup, `unroot` returns the target command's exit status. Commands terminated by a signal use the conventional `128 + signal` result. `pack` and `unpack` return GNU tar's result after namespace setup. Argument, namespace, ownership, mount, archive, emulation, and execution setup failures return a nonzero status with a diagnostic on standard error.",
+      "metadata": {
+        "priority": "90"
+      }
+    },
+    "topic:requirements": {
+      "kind": "topic",
+      "name": "requirements",
+      "title": "REQUIREMENTS",
+      "short_help": "REQUIREMENTS",
+      "syntax": "",
+      "description": "`single` and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer-container policy.\n\nRich ownership additionally requires `unroot-util` installed beside `unroot`, `/usr/bin/newuidmap`, `/usr/bin/newgidmap`, and a subordinate UID and GID allocation from the host's configured provider. Builds without libsubid support use `/etc/subuid` and `/etc/subgid` directly.\n\nNative ownership requires host root privileges and Linux mount and PID namespace support. `--map-ro` additionally requires `mount_setattr(2)`, available in Linux 5.12 or newer.\n\nPrivate foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.\n\n`pack` and `unpack` require GNU tar on the host `PATH`. Compressed output also requires the corresponding compression program selected by the archive suffix.",
+      "metadata": {
+        "priority": "100"
+      }
+    },
+    "section:files": {
+      "kind": "section",
+      "name": "files",
+      "title": "FILES",
+      "short_help": "FILES",
+      "syntax": "",
+      "description": "",
+      "metadata": {
+        "priority": "110"
+      }
+    },
+    "file:root-meta": {
+      "kind": "file",
+      "name": "root-meta",
+      "title": "ROOT/.unroot/meta.json",
+      "short_help": "ROOT/.unroot/meta.json",
+      "syntax": "ROOT/.unroot/meta.json",
+      "description": "Authoritative per-rootfs ownership and execution metadata maintained by `unroot`. Unmanaged `enter --native` does not create it.",
+      "metadata": {
+        "parent": "section:files",
+        "priority": "10"
+      }
+    },
+    "file:root-lock": {
+      "kind": "file",
+      "name": "root-lock",
+      "title": "ROOT/.unroot/meta.lock",
+      "short_help": "ROOT/.unroot/meta.lock",
+      "syntax": "ROOT/.unroot/meta.lock",
+      "description": "Coordination lock used while a managed root filesystem is initialized.",
+      "metadata": {
+        "parent": "section:files",
+        "priority": "20"
+      }
+    },
+    "file:root-bin": {
+      "kind": "file",
+      "name": "root-bin",
+      "title": "ROOT/.unroot/bin/",
+      "short_help": "ROOT/.unroot/bin/",
+      "syntax": "ROOT/.unroot/bin/",
+      "description": "Versioned wrapper and emulator staging paths used by private rich-mode foreign execution.",
+      "metadata": {
+        "parent": "section:files",
+        "priority": "30"
+      }
+    },
+    "file:subordinate-ids": {
+      "kind": "file",
+      "name": "subordinate-ids",
+      "title": "/etc/subuid, /etc/subgid",
+      "short_help": "/etc/subuid, /etc/subgid",
+      "syntax": "/etc/subuid, /etc/subgid",
+      "description": "Host allocations used for rich ownership when `unroot-util` is built without libsubid support.",
+      "metadata": {
+        "parent": "section:files",
+        "priority": "40"
+      }
+    },
+    "file:unroot-util": {
+      "kind": "file",
+      "name": "unroot-util",
+      "title": ".../unroot-util",
+      "short_help": ".../unroot-util",
+      "syntax": ".../unroot-util",
+      "description": "Dynamically linked host-integration helper used for rich subordinate-ID discovery. It must be installed in the same directory as `unroot`.",
+      "metadata": {
+        "parent": "section:files",
+        "priority": "50"
+      }
+    },
+    "topic:see-also": {
+      "kind": "topic",
+      "name": "see-also",
+      "title": "SEE ALSO",
+      "short_help": "SEE ALSO",
+      "syntax": "",
+      "description": "`chroot(1)`, `unshare(1)`, `user_namespaces(7)`, `namespaces(7)`, `binfmt_misc(5)`",
+      "metadata": {
+        "priority": "120"
+      }
+    }
+  },
+  "outline": [
+    {
+      "tag": "tool:unroot",
+      "children": []
+    },
+    {
+      "tag": "topic:synopsis",
+      "children": []
+    },
+    {
+      "tag": "topic:quick-start",
+      "children": []
+    },
+    {
+      "tag": "topic:rootfs-archives",
+      "children": []
+    },
+    {
+      "tag": "section:execution-model",
+      "children": [
+        {
+          "tag": "topic:command-selection",
+          "children": []
+        },
+        {
+          "tag": "topic:environment",
+          "children": []
+        },
+        {
+          "tag": "topic:ownership-model",
+          "children": []
+        },
+        {
+          "tag": "topic:filesystem-setup",
+          "children": []
+        },
+        {
+          "tag": "topic:foreign-execution",
+          "children": []
+        }
+      ]
+    },
+    {
+      "tag": "topic:security-model",
+      "children": []
+    },
+    {
+      "tag": "section:options",
+      "children": [
+        {
+          "tag": "option:enter.native",
+          "children": []
+        },
+        {
+          "tag": "option:process.cwd",
+          "children": []
+        },
+        {
+          "tag": "option:process.env",
+          "children": []
+        },
+        {
+          "tag": "option:process.persist-env",
+          "children": []
+        },
+        {
+          "tag": "option:enter.map",
+          "children": []
+        },
+        {
+          "tag": "option:enter.map-ro",
+          "children": []
+        },
+        {
+          "tag": "option:enter.emulation",
+          "children": []
+        },
+        {
+          "tag": "option:enter.qemu",
+          "children": []
+        },
+        {
+          "tag": "option:enter.qemu-cpu",
+          "children": []
+        },
+        {
+          "tag": "option:global.help",
+          "children": []
+        },
+        {
+          "tag": "option:global.debug",
+          "children": []
+        },
+        {
+          "tag": "option:global.version",
+          "children": []
+        }
+      ]
+    },
+    {
+      "tag": "section:mount-features",
+      "children": [
+        {
+          "tag": "topic:mount-features-overview",
+          "children": []
+        },
+        {
+          "tag": "feature:resolvconf",
+          "children": []
+        },
+        {
+          "tag": "feature:hosts",
+          "children": []
+        },
+        {
+          "tag": "feature:devpts",
+          "children": []
+        },
+        {
+          "tag": "feature:shm",
+          "children": []
+        },
+        {
+          "tag": "feature:run",
+          "children": []
+        },
+        {
+          "tag": "feature:mtab",
+          "children": []
+        },
+        {
+          "tag": "feature:devbind",
+          "children": []
+        }
+      ]
+    },
+    {
+      "tag": "topic:diagnostics",
+      "children": []
+    },
+    {
+      "tag": "topic:exit-status",
+      "children": []
+    },
+    {
+      "tag": "topic:requirements",
+      "children": []
+    },
+    {
+      "tag": "section:files",
+      "children": [
+        {
+          "tag": "file:root-meta",
+          "children": []
+        },
+        {
+          "tag": "file:root-lock",
+          "children": []
+        },
+        {
+          "tag": "file:root-bin",
+          "children": []
+        },
+        {
+          "tag": "file:subordinate-ids",
+          "children": []
+        },
+        {
+          "tag": "file:unroot-util",
+          "children": []
+        }
+      ]
+    },
+    {
+      "tag": "topic:see-also",
+      "children": []
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Docatoms",
+  "scopeName": "text.docatoms",
+  "patterns": [
+    { "include": "#atom-header" },
+    { "include": "#syntax-directive" },
+    { "include": "#fenced-code" },
+    { "include": "#body-line" }
+  ],
+  "repository": {
+    "atom-header": {
+      "match": "^(==)(\\s+)(@[a-z][a-z0-9-]*)(\\s+)([^:\\[]+)(?::([^\\[]*))?(\\[[^]]+\\])?\\s*$",
+      "captures": {
+        "1": { "name": "punctuation.definition.heading.begin.docatoms" },
+        "3": { "name": "storage.type.class.docatoms" },
+        "5": { "name": "entity.name.section.docatoms" },
+        "6": { "name": "string.unquoted.summary.docatoms" },
+        "7": { "name": "meta.brackets.docatoms" }
+      }
+    },
+    "syntax-directive": {
+      "match": "^(@syntax)(\\s+)(.+)$",
+      "captures": {
+        "1": { "name": "keyword.control.directive.docatoms" },
+        "3": { "name": "markup.raw.inline.docatoms" }
+      }
+    },
+    "fenced-code": {
+      "name": "markup.fenced_code.block.docatoms",
+      "begin": "^```[A-Za-z0-9_-]*\\s*$",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.raw.begin.docatoms" }
+      },
+      "end": "^```\\s*$",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.raw.end.docatoms" }
+      },
+      "contentName": "markup.raw.block.docatoms"
+    },
+    "body-line": {
+      "begin": "^(?!==\\s+@)(?!@syntax\\s)(?=\\S)",
+      "while": "^(?!==\\s+@)(?!\\s*$)",
+      "name": "comment.block.documentation.docatoms",
+      "patterns": [
+        { "include": "#single-backtick" },
+        { "include": "#asterisk-emphasis" }
+      ]
+    },
+    "single-backtick": {
+      "begin": "(?<!`)(`)(?=\\S)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.raw.begin.docatoms" }
+      },
+      "end": "(?<=\\S)(`)(?!`)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.raw.end.docatoms" }
+      },
+      "contentName": "markup.raw.inline.docatoms"
+    },
+    "asterisk-emphasis": {
+      "begin": "(?<!\\w)(\\*)(?!\\*)(?=\\S)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.italic.begin.docatoms" }
+      },
+      "end": "(?<=\\S)(\\*)(?!\\*)(?!\\w)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.italic.end.docatoms" }
+      },
+      "contentName": "markup.italic.docatoms"
+    }
+  }
+}

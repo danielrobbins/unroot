@@ -1,0 +1,5 @@
+unroot (@DEBIAN_VERSION@) @DISTRIBUTION@; urgency=medium
+
+  * Package Unroot @DEBIAN_VERSION@ for its upstream GitHub release.
+
+ -- Daniel Robbins <drobbins@breezyops.com>  @CHANGELOG_DATE@

@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	$(MAKE) all STRIP_BINARY=0
+
+override_dh_auto_test:
+	$(MAKE) test STRIP_BINARY=0
+	python3 -m pytest -q tests/test_docatoms.py tests/test_packaging.py tests/test_release.py
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/unroot PREFIX=/usr STRIP_BINARY=0
+
+override_dh_auto_clean:
+	$(MAKE) clean

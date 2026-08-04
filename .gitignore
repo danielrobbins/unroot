@@ -1,0 +1,57 @@
+# Build artifacts
+*.o
+*.obj
+*.lo
+*.a
+*.la
+*.so
+*.dylib
+*.dll
+*.out
+*.exe
+*.gcno
+*.gcda
+*.profraw
+*.profdata
+*.d
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Binaries and generated tools
+bin/*
+!bin/.gitkeep
+
+# Coverage reports
+coverage/**
+
+# Editor/OS cruft
+.DS_Store
+*.swp
+*.swo
+
+# Third-party temp caches
+third_party/.catch2-tmp/**
+
+# Keep vendored test headers tracked
+!third_party/catch2/**
+
+references/**
+working-reference/**
+.unroot/
+dist/**
+/e2e-reports/
+
+# Stray docs artifact created by older runs; use docs/ outputs instead
+/unroot.html
+/build
+.aider*
+
+# VS Code local state (leave settings.json / tasks.json tracked)
+.vscode/workspaceStorage/
+.vscode/globalStorage/
+.vscode/history/
+.vscode/*.code-workspace
+.vscode/*.db
+.vscode/*.log

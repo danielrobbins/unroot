@@ -1,0 +1,34 @@
+{
+  "name": "docatoms",
+  "displayName": "Docatoms",
+  "description": "Syntax highlighting for Docatoms documentation sources.",
+  "version": "0.0.1",
+  "publisher": "drobb",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "docatoms",
+        "aliases": [
+          "Docatoms"
+        ],
+        "extensions": [
+          ".docatoms"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "docatoms",
+        "scopeName": "text.docatoms",
+        "path": "./syntaxes/docatoms.tmLanguage.json"
+      }
+    ]
+  }
+}

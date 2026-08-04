@@ -1,0 +1,57 @@
+%global debug_package %{nil}
+%global _build_id_links none
+
+Name:           unroot
+Version:        @RPM_VERSION@
+Release:        @RPM_RELEASE@%{?dist}
+Summary:        Daemonless Linux rootfs and cross-architecture toolkit
+License:        GPL-3.0-only
+URL:            https://kernel-seeds.org/projects/unroot/
+Source0:        unroot-@SOURCE_VERSION@.tar.xz
+
+BuildRequires:  gcc-c++
+BuildRequires:  glibc-static
+BuildRequires:  libstdc++-static
+BuildRequires:  make
+BuildRequires:  python3
+BuildRequires:  python3-pytest
+BuildRequires:  shadow-utils-subid-devel
+Requires:       /usr/bin/newgidmap
+Requires:       /usr/bin/newuidmap
+Requires:       tar
+@QEMU_RECOMMENDS@
+Suggests:       gzip
+Suggests:       xz
+Suggests:       zstd
+
+%description
+Unroot enters, runs, creates, and transports Linux root filesystems using
+namespaces, durable subordinate-ID mappings, and optional QEMU user-mode
+emulation. It supports unprivileged rich roots, native host-owned roots,
+single-identity namespace execution, and faithful rootfs archives without a
+resident container daemon.
+
+%prep
+%setup -q -n unroot-@SOURCE_VERSION@
+
+%build
+make %{?_smp_mflags} all
+
+%install
+make install DESTDIR=%{buildroot} PREFIX=/usr
+
+%check
+make %{?_smp_mflags} test STRIP_BINARY=0
+python3 -m pytest -q tests/test_docatoms.py tests/test_packaging.py tests/test_release.py
+
+%files
+%license LICENSE
+%doc README.md RELEASE_NOTES.md
+%{_bindir}/unroot
+%{_bindir}/unroot-util
+%{_mandir}/man1/unroot.1*
+%{_docdir}/unroot/unroot.md
+
+%changelog
+* Sun Aug 03 2026 Daniel Robbins <drobbins@breezyops.com> - @RPM_VERSION@-@RPM_RELEASE@
+- Build the upstream Unroot release.

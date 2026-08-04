@@ -1,0 +1,214 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Linux (${{ matrix.arch }}, userns ${{ matrix.userns }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86-64
+            runner: ubuntu-24.04
+            userns: restricted
+            apparmor_value: 1
+            cross_package: gcc-aarch64-linux-gnu
+            cross_cc: aarch64-linux-gnu-gcc
+            foreign_qemu_cpu: cortex-a53
+          - arch: ARM64
+            runner: ubuntu-24.04-arm
+            userns: restricted
+            apparmor_value: 1
+            cross_package: gcc-x86-64-linux-gnu
+            cross_cc: x86_64-linux-gnu-gcc
+            foreign_qemu_cpu: qemu64
+          - arch: x86-64
+            runner: ubuntu-24.04
+            userns: enabled
+            apparmor_value: 0
+            cross_package: gcc-aarch64-linux-gnu
+            cross_cc: aarch64-linux-gnu-gcc
+            foreign_qemu_cpu: cortex-a53
+            native_rootfs_arch: x86_64
+            native_rootfs_sha256: 4b4daa9fe2fc696c4919c4412a4c3d3e770d8fb70292a004a2c72f5096175282
+            foreign_rootfs_arch: aarch64
+            foreign_rootfs_sha256: 3fbc6285032ed46821b511292633d7b2a6306a2e254f590e92bdafff56cf2f70
+          - arch: ARM64
+            runner: ubuntu-24.04-arm
+            userns: enabled
+            apparmor_value: 0
+            cross_package: gcc-x86-64-linux-gnu
+            cross_cc: x86_64-linux-gnu-gcc
+            foreign_qemu_cpu: qemu64
+            native_rootfs_arch: aarch64
+            native_rootfs_sha256: 3fbc6285032ed46821b511292633d7b2a6306a2e254f590e92bdafff56cf2f70
+            foreign_rootfs_arch: x86_64
+            foreign_rootfs_sha256: 4b4daa9fe2fc696c4919c4412a4c3d3e770d8fb70292a004a2c72f5096175282
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsubid-dev python3-pytest
+          if [[ "${{ matrix.userns }}" == "enabled" ]]; then
+            sudo apt-get install -y busybox-static qemu-user-static uidmap ${{ matrix.cross_package }}
+          fi
+      - name: Configure AppArmor user-namespace policy
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=${{ matrix.apparmor_value }}
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "${{ matrix.apparmor_value }}"
+      - name: Configure subordinate IDs
+        if: matrix.userns == 'enabled'
+        run: |
+          sudo sed -i "/^${USER}:/d" /etc/subuid /etc/subgid
+          printf '%s:1000000:65536\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
+          printf '%s:1000000:65536\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
+      - name: Acquire real rootfs fixtures
+        if: matrix.userns == 'enabled'
+        run: |
+          version=3.22.5
+          fetch_rootfs() {
+            role="$1"
+            arch="$2"
+            checksum="$3"
+            archive="${RUNNER_TEMP}/alpine-minirootfs-${version}-${arch}.tar.gz"
+            curl --fail --location --retry 3 \
+              --output "$archive" \
+              "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/${arch}/alpine-minirootfs-${version}-${arch}.tar.gz"
+            printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status
+            printf 'UNROOT_E2E_ALPINE_%s=%s\n' "$role" "$archive" >> "$GITHUB_ENV"
+            printf 'UNROOT_E2E_ALPINE_%s_ARCH=%s\n' "$role" "$arch" >> "$GITHUB_ENV"
+          }
+          fetch_rootfs NATIVE "${{ matrix.native_rootfs_arch }}" \
+            "${{ matrix.native_rootfs_sha256 }}"
+          fetch_rootfs FOREIGN "${{ matrix.foreign_rootfs_arch }}" \
+            "${{ matrix.foreign_rootfs_sha256 }}"
+      - name: Build and run unit tests
+        run: make test cli UNROOT_UTIL_LIBSUBID=1
+      - name: Verify libsubid helper backend
+        if: matrix.userns == 'enabled'
+        run: |
+          output=$(bin/unroot-util idmap --count 16)
+          test "$(printf '%s\n' "$output" | awk '{print $1, $4, $5}')" = "unroot-idmap-v1 16 libsubid"
+          read -r _ uid_start gid_start count _ <<<"$output"
+          bin/unroot-util idmap --validate "$uid_start" "$gid_start" "$count"
+      - name: Test release tooling
+        run: |
+          python3 -m pytest -q tests/test_docatoms.py tests/test_release.py
+          make docs-check
+      - name: Verify restricted-policy diagnostic
+        if: matrix.userns == 'restricted'
+        env:
+          UNROOT_E2E_USERNS_POLICY: restricted
+          UNROOT_E2E_REPORT: e2e-restricted-${{ matrix.arch }}.json
+        run: python3 -m pytest -q tests/e2e/test_namespace_policy.py
+      - name: Native namespace tests
+        if: matrix.userns == 'enabled'
+        env:
+          UNROOT_E2E_REPORT: e2e-native-${{ matrix.arch }}.json
+          UNROOT_E2E_STRICT: "1"
+          UNROOT_E2E_REQUIRE: private_binfmt,rich_idmap,native_mode,single_host_guard,rootfs_journey
+        run: make e2e
+      - name: Cross-architecture execution
+        if: matrix.userns == 'enabled'
+        env:
+          CROSS_CC: ${{ matrix.cross_cc }}
+          FOREIGN_QEMU_CPU: ${{ matrix.foreign_qemu_cpu }}
+          UNROOT_E2E_REPORT: e2e-cross-${{ matrix.arch }}.json
+          UNROOT_E2E_STRICT: "1"
+          UNROOT_E2E_REQUIRE: cross_arch,native_mode
+        run: make e2e-cross
+      - name: Upload E2E qualification reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-${{ matrix.arch }}-${{ matrix.userns }}
+          path: e2e-*.json
+          if-no-files-found: error
+
+  docker:
+    name: Docker policy qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build the strict public snapshot
+        run: |
+          python3 scripts/export_public.py "${RUNNER_TEMP}/unroot-public" --strict
+          docker build \
+            --file "${RUNNER_TEMP}/unroot-public/tests/containers/Dockerfile" \
+            --tag unroot-e2e \
+            "${RUNNER_TEMP}/unroot-public"
+      - name: Allow host user namespaces
+        run: |
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Verify the default Docker policy diagnostic
+        run: |
+          mkdir -p e2e-docker
+          chmod 0777 e2e-docker
+          docker run --rm \
+            --env UNROOT_E2E_USERNS_POLICY=restricted \
+            --env UNROOT_E2E_POLICY_DETAIL=container \
+            --env UNROOT_E2E_REPORT=/reports/default-policy.json \
+            --volume "${PWD}/e2e-docker:/reports" \
+            unroot-e2e \
+            python3 -m pytest -q tests/e2e/test_namespace_policy.py
+      - name: Verify the Docker ID-map policy diagnostic
+        run: |
+          docker run --rm \
+            --security-opt apparmor=unconfined \
+            --security-opt seccomp=unconfined \
+            --env UNROOT_E2E_SYSTEMPATHS_POLICY=restricted \
+            unroot-e2e \
+            python3 -m pytest -q tests/e2e/test_namespace_policy.py \
+              -k restricted_system_paths
+      - name: Run with nested namespaces enabled
+        run: |
+          docker run --rm \
+            --security-opt apparmor=unconfined \
+            --security-opt seccomp=unconfined \
+            --security-opt systempaths=unconfined \
+            --env UNROOT_E2E_STRICT=1 \
+            --env UNROOT_E2E_REQUIRE=private_binfmt,single_host_guard \
+            --env UNROOT_E2E_REPORT=/reports/nested-namespaces.json \
+            --volume "${PWD}/e2e-docker:/reports" \
+            unroot-e2e \
+            make e2e
+      - name: Upload Docker qualification reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-docker
+          path: e2e-docker/*.json
+          if-no-files-found: warn
+
+  musl-helper:
+    name: musl host helper
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build and exercise the direct-file backend
+        run: |
+          docker run --rm --volume "${PWD}:/source" --workdir /source alpine:3.22 sh -ec '
+            apk add --no-cache build-base
+            make clean
+            make util LTO=0 STRIP_BINARY=0 UNROOT_UTIL_LIBSUBID=0
+            ldd bin/unroot-util | grep -q musl
+            printf "root:100000:65536\n" > /etc/subuid
+            printf "root:200000:65536\n" > /etc/subgid
+            test "$(bin/unroot-util idmap --count 16)" = \
+              "unroot-idmap-v1 100000 200000 16 files"
+          '

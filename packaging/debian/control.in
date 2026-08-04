@@ -1,0 +1,30 @@
+Source: unroot
+Section: admin
+Priority: optional
+Maintainer: Daniel Robbins <drobbins@breezyops.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ g++,
+ libsubid-dev,
+ make,
+ python3,
+ python3-pytest
+Standards-Version: 4.7.2
+Homepage: https://kernel-seeds.org/projects/unroot/
+Rules-Requires-Root: no
+
+Package: unroot
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ tar,
+ uidmap
+@QEMU_RECOMMENDS@
+Suggests: gzip, xz-utils, zstd
+Description: daemonless Linux rootfs and cross-architecture toolkit
+ Unroot enters, runs, creates, and transports Linux root filesystems using
+ namespaces, durable subordinate-ID mappings, and optional QEMU user-mode
+ emulation. It supports unprivileged rich roots, native host-owned roots,
+ single-identity namespace execution, and faithful rootfs archives without a
+ resident container daemon.
