@@ -238,6 +238,29 @@ Run a trusted build as namespace root:
 unroot single --persist-env PATH -- /usr/bin/make -j8
 ```
 
+**Note:** To use managed rich roots (the default mode for `unpack` and `enter`),
+your account needs subordinate UID and GID ranges configured in
+`/etc/subuid` and `/etc/subgid`. This is a one-time host setup that enables
+unprivileged multi-user chroots. Native mode and single mode do not require
+subordinate IDs.
+
+To configure rich root support, add entries for your username (replace `drobbins`):
+
+```bash
+# View current allocations (if any)
+getent subuid "$USER"
+getent subgid "$USER"
+
+# Add subordinate ranges (requires root)
+echo "drobbins:100000:65536" | sudo tee -a /etc/subuid
+echo "drobbins:100000:65536" | sudo tee -a /etc/subgid
+```
+
+Each line has three fields: `username:start_id:count`. This example allocates
+IDs 100000–165535 (65,536 IDs) to your account, which is enough for most
+rootfs workflows. The kernel then maps these host IDs to the rootfs's users
+and groups, preserving multi-user ownership without requiring host root.
+
 Foreign architecture execution is automatic — unroot detects the executable type
 and selects an appropriate emulator. If QEMU user-mode emulation is already
 installed and registered on your host, unroot will reuse it. For rich roots, you
