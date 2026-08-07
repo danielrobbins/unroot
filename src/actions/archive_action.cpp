@@ -3,12 +3,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <unistd.h>
 
 #include "app_exception.hpp"
 #include "archive_config.hpp"
 #include "linuxns.hpp"
 #include "meta.hpp"
 #include "util/error_map.hpp"
+#include "util/fd.hpp"
 #include "util/path.hpp"
 #include "util/proc.hpp"
 
@@ -109,11 +111,38 @@ std::vector<std::string> metadataOptions() {
   return options;
 }
 
+class MetadataProbeFile {
+ public:
+  MetadataProbeFile() {
+    char path[] = "/tmp/.unroot-tar-probe-XXXXXX";
+    UniqueFd file(::mkstemp(path));
+    if (!file) fail("unable to create GNU tar metadata probe file");
+    path_ = path;
+  }
+
+  ~MetadataProbeFile() {
+    if (!path_.empty()) (void)::unlink(path_.c_str());
+  }
+
+  MetadataProbeFile(const MetadataProbeFile&) = delete;
+  MetadataProbeFile& operator=(const MetadataProbeFile&) = delete;
+
+  fs::path directory() const { return path_.parent_path(); }
+  fs::path filename() const { return path_.filename(); }
+
+ private:
+  fs::path path_;
+};
+
 void requireMetadataSupport(const std::string& tar, bool force) {
+  MetadataProbeFile probeFile;
   std::vector<std::string> arguments{tar, "--create", "--file=/dev/null",
-                                     "--files-from=/dev/null"};
+                                     "--no-recursion",
+                                     "--directory=" +
+                                         probeFile.directory().string()};
   auto metadata = metadataOptions();
   arguments.insert(arguments.end(), metadata.begin(), metadata.end());
+  arguments.push_back(probeFile.filename().string());
   auto probe = util::capture_execv(tar, arguments);
   if (!probe.output.empty() && probe.output.back() != '\n')
     probe.output.push_back('\n');

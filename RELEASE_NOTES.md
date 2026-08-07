@@ -1,6 +1,20 @@
+# Unroot 1.0.2
+
+**Maintenance Release** — August 7, 2026
+
+Unroot 1.0.2 fixes the archive metadata check introduced in 1.0.1. The check
+now asks GNU tar to process a real temporary file, ensuring older tar builds
+report missing ACL or extended-metadata support before `pack` or `unpack`
+proceeds. Without this fix, some tar builds reported the limitation only while
+processing the real rootfs, after the preflight had already passed.
+
+Hosts whose GNU tar lacks requested metadata support continue to fail closed by
+default. Use `--force` when reduced archive fidelity is understood and
+acceptable. ([#15](https://github.com/danielrobbins/unroot/issues/15))
+
 # Unroot 1.0.1
 
-**Maintenance Release** — August 8, 2026
+**Maintenance Release** — August 6, 2026
 
 Unroot 1.0.1 incorporates the first round of real-world feedback after the
 initial release.
@@ -82,7 +96,7 @@ upstream limitation but does not silently alter distribution policy.
 
 # Unroot 1.0.0
 
-**Initial Release** — August 5, 2026
+**Initial Release** — August 3, 2026
 
 unroot is a small, daemonless toolkit for entering, modifying, and transporting
 Linux root filesystems. It brings together rootless multi-user chroots,

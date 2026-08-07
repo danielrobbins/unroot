@@ -50,12 +50,24 @@ def _metadata_limited_tar(tmp_path: Path) -> Path:
         """#!/bin/sh
 case " $* " in
   *" --wildcards "*) exit 1 ;;
-  *" --file=/dev/null "*)
-    echo "tar: POSIX ACL support is not available" >&2
-    exit 0
-    ;;
-  *) exit 0 ;;
 esac
+
+directory=.
+member=
+probe=false
+for argument do
+    case "$argument" in
+        --directory=*) directory=${argument#--directory=} ;;
+        --file=/dev/null) probe=true ;;
+        --*) ;;
+        *) member=$argument ;;
+    esac
+done
+
+if "$probe" && [ -n "$member" ] && [ -f "$directory/$member" ]; then
+    echo "tar: POSIX ACL support is not available" >&2
+fi
+exit 0
 """,
         encoding="utf-8",
     )
@@ -143,6 +155,23 @@ def test_pack_requires_initialized_rootfs(
     result = unroot.run("pack", str(root), str(tmp_path / "output.tar"))
     assert result.returncode != 0
     assert "has no ID-map metadata" in result.stderr
+
+
+def test_pack_rejects_tar_that_cannot_preserve_metadata(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    tool = _metadata_limited_tar(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    archive = tmp_path / "output.tar"
+    path = str(tool.parent) + os.pathsep + os.environ.get("PATH", "")
+
+    result = unroot.run("pack", str(root), str(archive), env={"PATH": path})
+
+    assert result.returncode != 0
+    assert "POSIX ACL support is not available" in result.stderr
+    assert "Use --force to accept metadata loss" in result.stderr
+    assert not archive.exists()
 
 
 def test_unpack_refuses_to_overlay_an_existing_tree(
