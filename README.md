@@ -172,7 +172,7 @@ daemon overhead, image formats, or orchestration complexity.
 **Kernel developers** — Run one process inside another userspace for testing,
 validation, or tooling without booting VMs or managing containers.
 
-## Explicit Ownership Modes
+## Three Explicit Modes
 
 Linux root filesystems don't all have the same ownership requirements. unroot
 keeps those choices explicit rather than guessing or silently falling back:
@@ -266,28 +266,11 @@ QEMU. Native mode accepts a trusted root-owned emulator path but rejects
 `binfmt_misc` handler is registered system-wide, so it cannot carry per-rootfs
 CPU policy.
 
-A known QEMU compatibility boundary affects Portage's `pid-sandbox` during
-foreign-architecture builds. After Portage creates another PID namespace,
-QEMU linux-user can fail with:
-
-```text
-qemu: qemu_thread_create: Invalid argument
-```
-
-For foreign Gentoo or Funtoo builds, disable only this Portage feature in
-`/etc/portage/make.conf`:
-
-```bash
-FEATURES="-pid-sandbox"
-```
-
-Native-architecture builds do not need this workaround. This is an upstream
-QEMU limitation tracked by [QEMU issue #172](https://gitlab.com/qemu-project/qemu/-/issues/172)
-and [Unroot issue #13](https://github.com/danielrobbins/unroot/issues/13);
-Unroot does not silently rewrite distribution build policy.
-
-These controls affect execution only. You remain responsible for selecting
-distro profiles, compiler flags, and CPU baselines.
+**Note for Portage users:** Foreign-architecture Portage builds may need
+`FEATURES="-pid-sandbox"` in `/etc/portage/make.conf`. After Portage creates
+another PID namespace, QEMU linux-user can fail to create threads. This is an
+upstream QEMU limitation ([issue #172](https://gitlab.com/qemu-project/qemu/-/issues/172));
+native-architecture builds are unaffected.
 
 ## Rootfs Archives
 

@@ -1,53 +1,74 @@
 # Unroot 1.0.1
 
-**Maintenance Release** — August 2026
+**Maintenance Release** — August 8, 2026
 
 Unroot 1.0.1 incorporates the first round of real-world feedback after the
-initial release. It restores conventional chroot behavior at several important
-edges, makes the ownership model easier to use, and strengthens diagnostics and
-archive safety without expanding the project's scope.
+initial release.
+
+This release strengthens robustness, streamlines the user experience, improves
+the CLI interface, and enhances diagnostics and archive safety.
+
+Highlights include removing the standalone `single` command while adding
+`enter --single` for unmanaged rootfs trees, adding essential device nodes to
+`/dev` for better tool compatibility, fixing a `setgroups` issue affecting
+Gentoo (Gentoo users should still set `FEATURES="-pid-sandbox"` due to a
+QEMU/Portage incompatibility), providing a sensible default `PATH` to simplify
+command invocation, and making `--map-ro` more convenient for common use cases.
+Full details below:
 
 ## Rootfs Compatibility
 
-- The minimal `/dev` now provides `/dev/full`, the conventional fd and standard
-  stream links, and a correctly mapped PTY environment. Shell process
-  substitution and interactive tools work without exposing the host's complete
-  `/dev` tree. ([#2](https://github.com/danielrobbins/unroot/issues/2))
-- Target processes receive a deterministic rootfs-oriented `PATH` by default.
-  It remains explicitly configurable, and `--no-default-env` provides a truly
-  empty starting environment when required. ([#3](https://github.com/danielrobbins/unroot/issues/3))
-- Rich ID mappings retain supplementary-group support because their GID maps
-  are authorized through `newgidmap`; the required `setgroups` denial remains
-  limited to single-ID mappings. This allows Portage privilege dropping to work
-  normally. ([#6](https://github.com/danielrobbins/unroot/issues/6))
-- Namespace setup failures after ID mapping now retain their setup stage and
-  original system error, producing useful AppArmor, seccomp, SELinux, and
-  outer-container diagnostics. ([#7](https://github.com/danielrobbins/unroot/issues/7))
+- `/dev` now includes `/dev/full`, standard stream links, and proper PTY
+  support. Shell process substitution and interactive tools work correctly
+  without exposing the entire host `/dev` tree.
+  ([#2](https://github.com/danielrobbins/unroot/issues/2))
+
+- Commands now receive a sensible default `PATH` focused on the rootfs. You can
+  still customize it explicitly, or use `--no-default-env` for a completely
+  empty environment when needed.
+  ([#3](https://github.com/danielrobbins/unroot/issues/3))
+
+- Rich roots now preserve supplementary group memberships, allowing tools like
+  Portage to drop privileges correctly. The safety restriction on `setgroups`
+  remains in place for single-ID mappings only.
+  ([#6](https://github.com/danielrobbins/unroot/issues/6))
+
+- When namespace setup fails, error messages now clearly explain what went
+  wrong and why, including helpful context for AppArmor, seccomp, SELinux, or
+  container-related issues.
+  ([#7](https://github.com/danielrobbins/unroot/issues/7))
 
 ## Ownership And CLI
 
-- `unroot enter --single ROOT` explicitly supports unmanaged, single-owner
-  rootfs trees without requiring subordinate UID or GID allocations.
+- `unroot enter --single ROOT` lets you enter unmanaged, single-owner rootfs
+  trees without needing subordinate UID/GID allocations.
   ([#4](https://github.com/danielrobbins/unroot/issues/4))
-- `--map-ro SOURCE` is now shorthand for `--map-ro SOURCE:SOURCE`.
+
+- `--map-ro SOURCE` is now shorthand for `--map-ro SOURCE:SOURCE` — simpler
+  when the host and container paths match.
   ([#5](https://github.com/danielrobbins/unroot/issues/5))
-- The confusing standalone `unroot single` action has been removed. Single-ID
-  ownership now has one focused purpose: entering an explicitly selected
-  single-owner rootfs. ([#12](https://github.com/danielrobbins/unroot/issues/12),
+
+- The standalone `unroot single` command has been removed to reduce confusion.
+  Single-ID namespace root is now available through `unroot enter --single`
+  when entering a specific rootfs.
+  ([#12](https://github.com/danielrobbins/unroot/issues/12),
   [#14](https://github.com/danielrobbins/unroot/issues/14))
-- Native mode is now presented directly as Unroot's conventional privileged
+
+- Native mode is now described more clearly as Unroot's conventional privileged
   chroot workflow for host-owned and mounted filesystems.
   ([#11](https://github.com/danielrobbins/unroot/issues/11))
 
 ## Archive Safety And Ownership Conversion
 
-- `pack` and `unpack` preflight GNU tar's ACL, extended-attribute, and SELinux
-  support. Unroot refuses silent metadata loss by default; `--force` provides
-  an explicit override when reduced fidelity is acceptable.
+- `pack` and `unpack` now check whether your tar installation supports ACLs,
+  extended attributes, and SELinux labels. Unroot refuses to silently lose
+  metadata by default; use `--force` if you accept reduced fidelity.
   ([#8](https://github.com/danielrobbins/unroot/issues/8))
-- The documentation now explains how `pack` followed by `unpack --native`
-  converts a rich rootfs into a separate native tree, and how the reverse flow
-  creates a rich managed copy without unsafe manual ownership rewriting.
+
+- Documentation now explains how to convert between rich and native roots:
+  `pack` followed by `unpack --native` creates a native tree from a rich root,
+  while the reverse flow creates a managed rich copy without manual ownership
+  changes.
   ([#10](https://github.com/danielrobbins/unroot/issues/10))
 
 ## Known QEMU Compatibility Boundary
@@ -61,7 +82,7 @@ upstream limitation but does not silently alter distribution policy.
 
 # Unroot 1.0.0
 
-**Initial Release** — August 2026
+**Initial Release** — August 5, 2026
 
 unroot is a small, daemonless toolkit for entering, modifying, and transporting
 Linux root filesystems. It brings together rootless multi-user chroots,
