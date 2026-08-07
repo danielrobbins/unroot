@@ -41,6 +41,7 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     assert "--native" in enter_help.stdout
     assert "--cwd" in enter_help.stdout
     assert "--env" in enter_help.stdout
+    assert "--no-default-env" in enter_help.stdout
     assert "--emulation" in enter_help.stdout
     assert "--qemu" in enter_help.stdout
     assert "--qemu-cpu" in enter_help.stdout
@@ -56,6 +57,7 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     single_help = unroot.run("single", "--help").assert_ok()
     assert "--cwd" in single_help.stdout
     assert "--env" in single_help.stdout
+    assert "--no-default-env" in single_help.stdout
     assert "--native" not in single_help.stdout
 
 
@@ -417,13 +419,59 @@ def test_relative_executable_resolves_from_working_directory(
     assert result.stdout == "relative-ok"
 
 
-def test_bare_command_requires_explicit_path(
+def test_bare_command_uses_default_path(
     unroot: UnrootRunner, managed_rootfs: Path
 ) -> None:
-    result = unroot.run("enter", str(managed_rootfs), "--", "busybox", "true")
+    result = unroot.run(
+        "enter", str(managed_rootfs), "--", "busybox", "printf", "default-path-ok"
+    ).assert_ok()
+    assert result.stdout == "default-path-ok"
+
+
+def test_no_default_env_requires_path_for_bare_command(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter", str(managed_rootfs), "--no-default-env", "--", "busybox", "true"
+    )
 
     assert result.returncode != 0, result.diagnostic()
     assert "bare commands require PATH via --env or --persist-env" in result.stderr
+
+
+def test_absolute_command_receives_default_path(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        'printf "%s" "$PATH"',
+    ).assert_ok()
+    assert result.stdout == "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def test_explicit_path_wins_over_persisted_and_default_path(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--persist-env",
+        "PATH",
+        "--env",
+        "PATH=/bin",
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        'printf "%s" "$PATH"',
+        env={"PATH": "/host-only"},
+    ).assert_ok()
+    assert result.stdout == "/bin"
 
 
 def test_missing_command_in_explicit_path(

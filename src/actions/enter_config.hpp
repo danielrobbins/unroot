@@ -36,6 +36,7 @@ public:
     mutable std::vector<BindMap> maps;
     mutable std::string cwdInRoot;
     mutable NsEnvVars envVars;
+    mutable bool noDefaultEnv = false;
     
     // Enter-specific configuration (mutable for lazy initialization)
     mutable std::vector<std::string> shell;

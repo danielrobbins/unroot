@@ -48,7 +48,8 @@ TEST_CASE("single has a distinct no-rootfs command surface") {
     CHECK(config.single);
     CHECK(config.root.empty());
     CHECK(config.cwdInRoot == "/tmp");
-    REQUIRE(config.envVars.size() == 1);
+    REQUIRE(config.envVars.size() == 2);
     CHECK(config.envVars[0].first == "VALUE");
     CHECK(config.envVars[0].second == "ok");
+    CHECK(config.envVars[1].first == "PATH");
 }

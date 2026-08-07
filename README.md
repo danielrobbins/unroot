@@ -70,7 +70,6 @@ libraries, but with the CPU and memory of your workstation:
 
 ```bash
 sudo unroot enter --native /mnt/raspi4-root \
-    --env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     -- /bin/bash
 ```
 
@@ -136,7 +135,6 @@ different userspace:
 ```bash
 unroot enter ~/roots/debian-testing \
     --map-ro "$PWD:/work" \
-    --env PATH=/bin:/usr/bin \
     -- /usr/bin/python3 /work/check-release.py
 ```
 
@@ -224,13 +222,14 @@ Run a specific command with a clean environment:
 ```bash
 unroot enter ~/rootfs \
     --cwd /build \
-    --env PATH=/bin:/usr/bin \
     --env MAKEFLAGS=-j8 \
     -- make
 ```
 
-Use `--persist-env` to copy selected variables from the host. Bare command names
-require an explicit `PATH`; absolute commands work without one.
+Unroot supplies a conventional target-side `PATH` but does not inherit the
+host environment. Use `--persist-env` to copy selected host variables,
+`--env` to set explicit values, or `--no-default-env` when even the built-in
+`PATH` should be omitted.
 
 Run a trusted build as namespace root:
 

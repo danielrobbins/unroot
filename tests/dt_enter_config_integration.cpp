@@ -26,6 +26,35 @@ TEST_CASE("EnterConfig integration: ROOT plus trailing command via --") {
     REQUIRE(cfg.shell.size() == 2);
     CHECK(cfg.shell[0] == "/bin/echo");
     CHECK(cfg.shell[1] == "hello");
+    REQUIRE(cfg.envVars.size() == 1);
+    CHECK(cfg.envVars[0].first == "PATH");
+    CHECK(cfg.envVars[0].second ==
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+}
+
+TEST_CASE("EnterConfig environment precedence is explicit, persisted, default") {
+    EnterConfig persisted;
+    ToBeParsedArgs persistedArgs;
+    persistedArgs.args = {"/rootfs", "--persist-env", "PATH", "--", "/bin/true"};
+    persisted.parse(persistedArgs);
+    REQUIRE(persisted.envVars.size() == 1);
+    CHECK(persisted.envVars[0].first == "PATH");
+    CHECK(persisted.envVars[0].second == ::getenv("PATH"));
+
+    EnterConfig explicitValue;
+    ToBeParsedArgs explicitArgs;
+    explicitArgs.args = {"/rootfs", "--persist-env", "PATH", "--env", "PATH=/target/path",
+                         "--", "/bin/true"};
+    explicitValue.parse(explicitArgs);
+    REQUIRE(explicitValue.envVars.size() == 1);
+    CHECK(explicitValue.envVars[0].first == "PATH");
+    CHECK(explicitValue.envVars[0].second == "/target/path");
+
+    EnterConfig empty;
+    ToBeParsedArgs emptyArgs;
+    emptyArgs.args = {"/rootfs", "--no-default-env", "--", "/bin/true"};
+    empty.parse(emptyArgs);
+    CHECK(empty.envVars.empty());
 }
 
 TEST_CASE("EnterConfig integration: implicit trailing without -- is collected when allowed") {

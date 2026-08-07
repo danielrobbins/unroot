@@ -30,7 +30,7 @@
       "title": "QUICK START",
       "short_help": "QUICK START",
       "syntax": "",
-      "description": "Create a faithful multi-user rootfs from an archive, then enter it:\n\n```console\n$ unroot unpack alpine.tar.zst ~/rootfs\n$ unroot enter ~/rootfs\n```\n\n`unpack` requires subordinate UID and GID allocations. It checks the allocation and mapping helpers before creating *ROOT*, so an incomplete host setup does not leave behind a partially initialized destination.\n\nRun a specific command with an explicit environment:\n\n```console\n$ unroot enter ~/rootfs \\\n    --cwd /build \\\n    --env PATH=/bin:/usr/bin \\\n    --env MAKEFLAGS=-j8 \\\n    -- make\n```\n\nEnter an existing host-owned or NFS-mounted Raspberry Pi rootfs from an x86-64 workstation:\n\n```console\n$ sudo unroot enter --native /mnt/raspi4-root -- /bin/sh\n```\n\nThe explicit `--native` selects host ownership and authorizes any host-global foreign-execution setup required for this boot. The rootfs is not modified with Unroot metadata merely because it was entered.\n\nUse single-identity namespace capabilities without changing the filesystem root:\n\n```console\n$ unroot single -- /usr/bin/id\n```\n\nCapture a managed rootfs after modifying it:\n\n```console\n$ unroot pack ~/rootfs alpine-modified.tar.zst\n```\n\nThe archive is host-independent, while its binaries retain the rootfs's target architecture. On another supported Linux host, `unroot` either runs them natively or selects the matching QEMU emulator.",
+      "description": "Create a faithful multi-user rootfs from an archive, then enter it:\n\n```console\n$ unroot unpack alpine.tar.zst ~/rootfs\n$ unroot enter ~/rootfs\n```\n\n`unpack` requires subordinate UID and GID allocations. It checks the allocation and mapping helpers before creating *ROOT*, so an incomplete host setup does not leave behind a partially initialized destination.\n\nRun a specific command with an explicit environment:\n\n```console\n$ unroot enter ~/rootfs \\\n    --cwd /build \\\n    --env MAKEFLAGS=-j8 \\\n    -- make\n```\n\nEnter an existing host-owned or NFS-mounted Raspberry Pi rootfs from an x86-64 workstation:\n\n```console\n$ sudo unroot enter --native /mnt/raspi4-root -- /bin/sh\n```\n\nThe explicit `--native` selects host ownership and authorizes any host-global foreign-execution setup required for this boot. The rootfs is not modified with Unroot metadata merely because it was entered.\n\nUse single-identity namespace capabilities without changing the filesystem root:\n\n```console\n$ unroot single -- /usr/bin/id\n```\n\nCapture a managed rootfs after modifying it:\n\n```console\n$ unroot pack ~/rootfs alpine-modified.tar.zst\n```\n\nThe archive is host-independent, while its binaries retain the rootfs's target architecture. On another supported Linux host, `unroot` either runs them natively or selects the matching QEMU emulator.",
       "metadata": {
         "priority": "20"
       }
@@ -63,7 +63,7 @@
       "title": "Command selection",
       "short_help": "Command selection",
       "syntax": "",
-      "description": "Absolute commands are interpreted inside the selected root filesystem. Commands containing a slash are executed relative to `--cwd`, or `/` in rooted mode when no working directory is specified.\n\nA bare command name requires `PATH` to be selected explicitly with `--env` or `--persist-env`. This avoids an implicit host or C library search path in a reproducible build environment.\n\nScripts are supported. For architecture detection, `unroot` follows the script's shebang and inspects the actual interpreter rather than assuming that the requested file is an ELF executable.\n\nIf no command is supplied, rooted and single modes run `/bin/sh`.",
+      "description": "Absolute commands are interpreted inside the selected root filesystem. Commands containing a slash are executed relative to `--cwd`, or `/` in rooted mode when no working directory is specified.\n\nA bare command name is resolved with Unroot's deterministic target `PATH`: `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`. Unroot never imports the host `PATH` implicitly.\n\nScripts are supported. For architecture detection, `unroot` follows the script's shebang and inspects the actual interpreter rather than assuming that the requested file is an ELF executable.\n\nIf no command is supplied, rooted and single modes run `/bin/sh`.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "10"
@@ -75,7 +75,7 @@
       "title": "Environment",
       "short_help": "Environment",
       "syntax": "",
-      "description": "The target command does not inherit the host environment by default. Add or replace a value with repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.",
+      "description": "The target command does not inherit the host environment by default. Unroot supplies only a deterministic target `PATH`, which can be replaced along with any other value using repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.\n\nUse `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--persist-env` selections still apply. A bare command cannot be resolved when `PATH` is absent or empty, so use an absolute command in a deliberately pathless environment.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "20"
@@ -185,6 +185,18 @@
       "metadata": {
         "parent": "section:options",
         "priority": "40"
+      }
+    },
+    "option:process.no-default-env": {
+      "kind": "option",
+      "name": "process.no-default-env",
+      "title": "--no-default-env",
+      "short_help": "--no-default-env",
+      "syntax": "--no-default-env",
+      "description": "Do not supply Unroot's deterministic target `PATH`. Explicit `--env` and `--persist-env` selections are unaffected.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "45"
       }
     },
     "option:enter.map": {
@@ -569,6 +581,10 @@
         },
         {
           "tag": "option:process.persist-env",
+          "children": []
+        },
+        {
+          "tag": "option:process.no-default-env",
           "children": []
         },
         {

@@ -19,6 +19,11 @@
 
 namespace actions {
 
+namespace {
+constexpr const char* defaultPath =
+    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+}
+
 // Virtual configure pattern implementation for EnterConfig
 void EnterConfig::configure_parser() {
     ActionConfig::configure_parser();
@@ -71,6 +76,9 @@ void EnterConfig::configureExecutionOptions() {
         .add_option_meta({"--persist-env"}, "<names>",
             "Comma-separated list of environment variables to preserve",
             [this](const std::string& v) { parsePersistEnv(v); })
+        .add_flag_meta({"--no-default-env"},
+            "Do not add Unroot's default PATH to the target environment",
+            [this]() { noDefaultEnv = true; })
         .add_flag_meta({"--help", "-h"}, "Display help for this action", [](){});
 }
 
@@ -248,14 +256,12 @@ void EnterConfig::analyzeArchitecture() {
 }
 
 void EnterConfig::resolveEnvironment() {
+    auto hasKey = [&](const std::string& key) {
+        return std::any_of(envVars.begin(), envVars.end(),
+            [&](const auto& value) { return value.first == key; });
+    };
+
     if (!persistEnvNames.empty()) {
-        auto hasKey = [&](const std::string& k) { 
-            for (auto& kv : envVars) {
-                if (kv.first == k) return true; 
-            }
-            return false; 
-        };
-        
         for (const auto& name : persistEnvNames) {
             if (name.empty() || hasKey(name)) continue;
             
@@ -265,6 +271,9 @@ void EnterConfig::resolveEnvironment() {
             }
         }
     }
+
+    if (!noDefaultEnv && !hasKey("PATH"))
+        envVars.emplace_back("PATH", defaultPath);
 }
 
 int EnterConfig::handle(const ToBeParsedArgs& args) {

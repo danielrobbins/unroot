@@ -51,7 +51,6 @@ Run a specific command with an explicit environment:
 ```console
 $ unroot enter ~/rootfs \
     --cwd /build \
-    --env PATH=/bin:/usr/bin \
     --env MAKEFLAGS=-j8 \
     -- make
 ```
@@ -98,7 +97,7 @@ Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty
 
 Absolute commands are interpreted inside the selected root filesystem. Commands containing a slash are executed relative to `--cwd`, or `/` in rooted mode when no working directory is specified.
 
-A bare command name requires `PATH` to be selected explicitly with `--env` or `--persist-env`. This avoids an implicit host or C library search path in a reproducible build environment.
+A bare command name is resolved with Unroot's deterministic target `PATH`: `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`. Unroot never imports the host `PATH` implicitly.
 
 Scripts are supported. For architecture detection, `unroot` follows the script's shebang and inspects the actual interpreter rather than assuming that the requested file is an ELF executable.
 
@@ -106,7 +105,7 @@ If no command is supplied, rooted and single modes run `/bin/sh`.
 
 ### Environment
 
-The target command does not inherit the host environment by default. Add or replace a value with repeatable `--env KEY=VALUE` options:
+The target command does not inherit the host environment by default. Unroot supplies only a deterministic target `PATH`, which can be replaced along with any other value using repeatable `--env KEY=VALUE` options:
 
 ```console
 $ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make
@@ -119,6 +118,8 @@ $ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh
 ```
 
 An explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.
+
+Use `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--persist-env` selections still apply. A bare command cannot be resolved when `PATH` is absent or empty, so use an absolute command in a deliberately pathless environment.
 
 ### Rootfs ownership
 
@@ -184,6 +185,10 @@ Set an environment variable for the target command. May be repeated.
 ### --persist-env NAMES
 
 Copy a comma-separated list of variables from the host environment.
+
+### --no-default-env
+
+Do not supply Unroot's deterministic target `PATH`. Explicit `--env` and `--persist-env` selections are unaffected.
 
 ### --map PATH
 

@@ -59,7 +59,6 @@ Run a specific command with an explicit environment:
 .nf
 $ unroot enter \(ti/rootfs \e
     \-\-cwd /build \e
-    \-\-env PATH=/bin:/usr/bin \e
     \-\-env MAKEFLAGS=\-j8 \e
     \-\- make
 .fi
@@ -107,14 +106,14 @@ Unpacking is intentionally not an overlay operation: \fIROOT\fR must be new or e
 .PP
 Absolute commands are interpreted inside the selected root filesystem. Commands containing a slash are executed relative to \fB\-\-cwd\fR, or \fB/\fR in rooted mode when no working directory is specified.
 .PP
-A bare command name requires \fBPATH\fR to be selected explicitly with \fB\-\-env\fR or \fB\-\-persist\-env\fR\&. This avoids an implicit host or C library search path in a reproducible build environment.
+A bare command name is resolved with Unroot's deterministic target \fBPATH\fR: \fB/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\fR\&. Unroot never imports the host \fBPATH\fR implicitly.
 .PP
 Scripts are supported. For architecture detection, \fBunroot\fR follows the script's shebang and inspects the actual interpreter rather than assuming that the requested file is an ELF executable.
 .PP
 If no command is supplied, rooted and single modes run \fB/bin/sh\fR\&.
 .SS Environment
 .PP
-The target command does not inherit the host environment by default. Add or replace a value with repeatable \fB\-\-env KEY=VALUE\fR options:
+The target command does not inherit the host environment by default. Unroot supplies only a deterministic target \fBPATH\fR, which can be replaced along with any other value using repeatable \fB\-\-env KEY=VALUE\fR options:
 .RS 4
 .nf
 $ unroot enter \(ti/rootfs \-\-env PATH=/bin:/usr/bin \-\- make
@@ -129,6 +128,8 @@ $ unroot enter \(ti/rootfs \-\-persist\-env TERM,MAKEFLAGS \-\- /bin/sh
 .RE
 .PP
 An explicit \fB\-\-env\fR value wins when the same name also appears in \fB\-\-persist\-env\fR\&. Names requested through \fB\-\-persist\-env\fR but absent from the host are ignored.
+.PP
+Use \fB\-\-no\-default\-env\fR to suppress the built\-in \fBPATH\fR\&. Explicit \fB\-\-env\fR and \fB\-\-persist\-env\fR selections still apply. A bare command cannot be resolved when \fBPATH\fR is absent or empty, so use an absolute command in a deliberately pathless environment.
 .SS Rootfs ownership
 .PP
 A managed rootfs has an authoritative ownership record in \fB\&.unroot/meta.json\fR:
@@ -186,6 +187,9 @@ Set an environment variable for the target command. May be repeated.
 .TP
 \fB\-\-persist\-env NAMES\fR
 Copy a comma\-separated list of variables from the host environment.
+.TP
+\fB\-\-no\-default\-env\fR
+Do not supply Unroot's deterministic target \fBPATH\fR\&. Explicit \fB\-\-env\fR and \fB\-\-persist\-env\fR selections are unaffected.
 .TP
 \fB\-\-map PATH\fR
 Bind an absolute host path at the same path inside \fIROOT\fR\&. May be repeated.
