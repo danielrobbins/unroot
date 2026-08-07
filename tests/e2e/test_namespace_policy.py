@@ -33,6 +33,7 @@ def test_restricted_user_namespace_reports_classified_failure(
         result.diagnostic()
     )
     expected = {
+        4: "failed to set MS_PRIVATE",
         10: "unshare failed",
         29: "setgroups deny failed",
     }

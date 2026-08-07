@@ -91,14 +91,6 @@ static inline bool mount_ok(const char* src, const char* target, const char* fst
   return ::mount(src, target, fstype, flags, data) == 0;
 }
 
-NsResult makeMountPrivate() {
-  if (!mount_ok(nullptr, "/", nullptr, MS_PRIVATE | MS_REC, nullptr))
-    return {4, "failed to set MS_PRIVATE"};
-  return {0, {}};
-}
-
-
-
 static bool isProcUsable() {
   struct stat st{};
   return ::stat("/proc/self", &st) == 0;
@@ -472,30 +464,39 @@ std::vector<std::string> resolveFeatureNamesFromEnv() {
 
 namespace {
 
+struct SetupResult {
+    int status = 0;
+    int error = 0;
+};
+
+[[noreturn]] void reportSetupFailure(int output, int status);
+
 // Common namespace setup for native and foreign-architecture target execution.
-// Returns true on success; the caller exits with the appropriate setup code.
-bool setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* emu, 
-                              const std::vector<BindMap>* maps, const NsEnvVars* envVars, 
-                              const std::string* cwdInRoot) {
+SetupResult setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* emu,
+                                      const std::vector<BindMap>* maps,
+                                      const NsEnvVars* envVars,
+                                      const std::string* cwdInRoot) {
     // Set up mount namespace
-    if (auto e = makeMountPrivate(); e.code != 0) return false;
+    if (!mount_ok(nullptr, "/", nullptr, MS_PRIVATE | MS_REC, nullptr))
+        return {104, errno};
     
     NsOptions opts = resolveOptionsFromEnv(rootfs.empty());
     
     if (!rootfs.empty()) {
         util::Rootfs root(rootfs);
-        if (!root || !setupPreChrootBinds(root, opts, emu, maps)) return false;
+        if (!root || !setupPreChrootBinds(root, opts, emu, maps))
+            return {105, errno};
         if (::fchdir(root.fd()) != 0 || ::chroot(".") != 0 ||
-            ::chdir("/") != 0) return false;
+            ::chdir("/") != 0) return {105, errno};
     }
     
     setupPostChrootMounts(opts, rootfs.empty());
-    if (!setupPrivateBinfmt(emu)) return false;
+    if (!setupPrivateBinfmt(emu)) return {105, errno};
     
     if (cwdInRoot && !cwdInRoot->empty()) {
         if (::chdir(cwdInRoot->c_str()) != 0) {
             recordStep("chdir", false, true, cwdInRoot->c_str());
-            return false;
+            return {111, errno};
         }
     }
 
@@ -506,17 +507,19 @@ bool setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* emu,
             if (const char* value = ::getenv(name)) wrapperEnv.emplace_back(name, value);
         }
     }
-    if (::clearenv() != 0) return false;
+    if (::clearenv() != 0) return {105, errno};
     for (const auto& kv : wrapperEnv) {
-        if (::setenv(kv.first.c_str(), kv.second.c_str(), 1) != 0) return false;
+        if (::setenv(kv.first.c_str(), kv.second.c_str(), 1) != 0)
+            return {105, errno};
     }
     if (envVars) {
         for (const auto& kv : *envVars) {
-            if (::setenv(kv.first.c_str(), kv.second.c_str(), 1) != 0) return false;
+            if (::setenv(kv.first.c_str(), kv.second.c_str(), 1) != 0)
+                return {105, errno};
         }
     }
     
-    return true;
+    return {};
 }
 
 // The logic for the process that becomes PID 1 in the new namespace.
@@ -538,8 +541,11 @@ bool setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* emu,
     if (gNsJsonOverride < 0) gNsJsonOverride = currentJsonLog() ? 1 : 0;
     UniqueFd setup(setupWrite);
     // Set up namespace environment
-    if (!setupNamespaceEnvironment(rootfs, emu, maps, envVars, cwdInRoot)) {
-        _exit(105); // chroot/chdir/setup failed
+    SetupResult result = setupNamespaceEnvironment(rootfs, emu, maps, envVars,
+                                                   cwdInRoot);
+    if (result.status != 0) {
+        errno = result.error;
+        reportSetupFailure(setup.get(), result.status);
     }
 
     // Final exec logic
@@ -731,7 +737,8 @@ static NsResult decodeChildStatus(int status, int setupErrno = 0) {
     case 101: return {23, "sync failed"};
     case 102: return {2, "failed to write uid_map"};
     case 103: return {24, "ID mapping failed"};
-    case 104: return {4, "failed to set MS_PRIVATE"};
+    case 104: return {4, namespacePolicyDiagnostic(
+        "failed to set MS_PRIVATE", setupErrno)};
     case 105: return {11, "chroot/chdir failed"};
     case 106: return {12, "exec failed"};
     case 107: return {13, "user bind map failed"};
@@ -774,8 +781,11 @@ static NsResult parentLogic(pid_t childPid, int c2pRead, int p2cWrite,
   pw.reset();
 
   char setup = 0;
-  bool setupComplete = mapping.code == 0 && notified &&
-                       util::read_exact(cr.get(), &setup, 1) && setup == 'S';
+  bool setupReceived = mapping.code == 0 && notified &&
+                       util::read_exact(cr.get(), &setup, 1);
+  if (setupReceived && setup == 'E')
+    (void)util::read_exact(cr.get(), &setupErrno, sizeof(setupErrno));
+  bool setupComplete = setupReceived && setup == 'S';
   cr.reset();
 
   int status = 0;
@@ -787,7 +797,8 @@ static NsResult parentLogic(pid_t childPid, int c2pRead, int p2cWrite,
   if (!readyReceived) return decodeChildStatus(status, setupErrno);
   if (mapping.code != 0) return mapping;
   if (!notified) return {23, "failed to notify child after ID mapping"};
-  return setupComplete ? decodeTargetStatus(status) : decodeChildStatus(status);
+  return setupComplete ? decodeTargetStatus(status)
+                       : decodeChildStatus(status, setupErrno);
 }
 
 static NsResult parentNativeLogic(pid_t childPid, int c2pRead) {
