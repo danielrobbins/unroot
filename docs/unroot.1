@@ -112,6 +112,16 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 .PP
 \fBunroot pack\fR requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside \fIROOT\fR\&. Destination suffixes select common compression formats such as \fB\&.gz\fR, \fB\&.xz\fR, and \fB\&.zst\fR\&.
 .PP
+\fBpack\fR records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host\-root\-owned copy of a rich rootfs:
+.RS 4
+.nf
+$ unroot pack \(ti/roots/gentoo\-rich gentoo.tar.zst
+$ sudo unroot unpack \-\-native gentoo.tar.zst \(ti/roots/gentoo\-native
+.fi
+.RE
+.PP
+The reverse works for a managed native root: run \fBsudo unroot pack\fR on that root, then use ordinary \fBunroot unpack\fR to create a rich unprivileged copy. Conversion always creates a separate destination tree; it does not recursively rewrite the source rootfs or its metadata.
+.PP
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host\-specific top\-level \fB\&.unroot\fR tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 .PP
 Before modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced\-fidelity result. Use \fB\-\-force\fR to proceed only when that metadata loss is understood and acceptable.

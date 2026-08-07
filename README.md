@@ -318,6 +318,20 @@ and extended attributes including file capabilities. SELinux labels are included
 when active. Compression is selected from the destination suffix (`.gz`, `.xz`,
 `.zst`).
 
+Archives contain the ownership visible inside the managed root, not its shifted
+host representation. This makes `pack` and `unpack` the safe way to copy a rootfs
+between ownership models. For example, turn a rich root into a separate native,
+host-root-owned tree with:
+
+```bash
+unroot pack ~/roots/gentoo-rich gentoo.tar.zst
+sudo unroot unpack --native gentoo.tar.zst ~/roots/gentoo-native
+```
+
+To go the other way, run `sudo unroot pack` on a managed native root and unpack
+the archive normally to create a rich unprivileged copy. The source tree is not
+modified during either conversion.
+
 Packing requires a managed rootfs. Unpacking requires an empty destination and
 never overlays an existing tree. Host-specific `.unroot` metadata is excluded
 from archives; incoming archives containing it are rejected.

@@ -98,6 +98,15 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 
 `unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.
 
+`pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:
+
+```console
+$ unroot pack ~/roots/gentoo-rich gentoo.tar.zst
+$ sudo unroot unpack --native gentoo.tar.zst ~/roots/gentoo-native
+```
+
+The reverse works for a managed native root: run `sudo unroot pack` on that root, then use ordinary `unroot unpack` to create a rich unprivileged copy. Conversion always creates a separate destination tree; it does not recursively rewrite the source rootfs or its metadata.
+
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 
 Before modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced-fidelity result. Use `--force` to proceed only when that metadata loss is understood and acceptable.
