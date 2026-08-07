@@ -41,7 +41,7 @@
       "title": "ROOTFS ARCHIVES",
       "short_help": "ROOTFS ARCHIVES",
       "syntax": "",
-      "description": "`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.\n\n`sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.\n\nBoth forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. A conflicting requested mode is rejected.\n\n`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.\n\nBoth actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.\n\nUnpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host-capability checks complete before *ROOT* is created or modified.",
+      "description": "`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.\n\n`sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.\n\nBoth forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. A conflicting requested mode is rejected.\n\n`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.\n\nBoth actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.\n\nBefore modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced-fidelity result. Use `--force` to proceed only when that metadata loss is understood and acceptable.\n\nUnpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host-capability checks complete before *ROOT* is created or modified.",
       "metadata": {
         "priority": "30"
       }
@@ -161,6 +161,18 @@
       "metadata": {
         "parent": "section:options",
         "priority": "10"
+      }
+    },
+    "option:archive.force": {
+      "kind": "option",
+      "name": "archive.force",
+      "title": "--force",
+      "short_help": "--force",
+      "syntax": "--force",
+      "description": "Allow `pack` or `unpack` to continue when the host GNU tar reports that requested extended filesystem metadata cannot be preserved. The capability warning is still displayed. This option does not override tar execution errors.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "15"
       }
     },
     "option:process.cwd": {
@@ -589,6 +601,10 @@
         },
         {
           "tag": "option:enter.native",
+          "children": []
+        },
+        {
+          "tag": "option:archive.force",
           "children": []
         },
         {

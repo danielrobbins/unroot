@@ -43,6 +43,26 @@ def _create_archive(source: Path, archive: Path) -> None:
     )
 
 
+def _metadata_limited_tar(tmp_path: Path) -> Path:
+    tool = tmp_path / "tools" / "tar"
+    tool.parent.mkdir()
+    tool.write_text(
+        """#!/bin/sh
+case " $* " in
+  *" --wildcards "*) exit 1 ;;
+  *" --file=/dev/null "*)
+    echo "tar: POSIX ACL support is not available" >&2
+    exit 0
+    ;;
+  *) exit 0 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    return tool
+
+
 def _assert_payload_tree(root: Path) -> None:
     payload = root / "payload"
     assert payload.read_text(encoding="utf-8") == "rootfs payload\n"
@@ -143,6 +163,41 @@ def test_unpack_refuses_to_overlay_an_existing_tree(
     assert result.returncode != 0
     assert "ROOT must be empty" in result.stderr
     assert existing.read_text(encoding="utf-8") == "keep"
+
+
+def test_unpack_rejects_tar_that_cannot_preserve_metadata(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    tool = _metadata_limited_tar(tmp_path)
+    archive = tmp_path / "input.tar"
+    archive.touch()
+    root = tmp_path / "root"
+    path = str(tool.parent) + os.pathsep + os.environ.get("PATH", "")
+
+    result = unroot.run("unpack", str(archive), str(root), env={"PATH": path})
+
+    assert result.returncode != 0
+    assert "POSIX ACL support is not available" in result.stderr
+    assert "Use --force to accept metadata loss" in result.stderr
+    assert not root.exists()
+
+
+def test_unpack_force_accepts_reported_metadata_loss(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    tool = _metadata_limited_tar(tmp_path)
+    archive = tmp_path / "input.tar"
+    archive.touch()
+    root = tmp_path / "root"
+    path = str(tool.parent) + os.pathsep + os.environ.get("PATH", "")
+
+    result = unroot.run(
+        "unpack", "--force", str(archive), str(root), env={"PATH": path}
+    )
+
+    assert "POSIX ACL support is not available" in result.stderr
+    assert "Continuing because --force was specified" in result.stderr
+    assert "Use --force to accept metadata loss" not in result.stderr
 
 
 def test_unpack_rejects_private_unroot_metadata(

@@ -15,6 +15,7 @@ class PackConfig : public ActionConfig {
 
   std::string root;
   std::string archive;
+  bool force = false;
 
   std::string getActionName() const override { return "pack"; }
   void validate() const override;
@@ -31,6 +32,7 @@ class UnpackConfig : public ActionConfig {
   std::string archive;
   std::string root;
   bool native = false;
+  bool force = false;
 
   std::string getActionName() const override { return "unpack"; }
   void validate() const override;

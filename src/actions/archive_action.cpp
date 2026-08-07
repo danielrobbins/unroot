@@ -109,6 +109,26 @@ std::vector<std::string> metadataOptions() {
   return options;
 }
 
+void requireMetadataSupport(const std::string& tar, bool force) {
+  std::vector<std::string> arguments{tar, "--create", "--file=/dev/null",
+                                     "--files-from=/dev/null"};
+  auto metadata = metadataOptions();
+  arguments.insert(arguments.end(), metadata.begin(), metadata.end());
+  auto probe = util::capture_execv(tar, arguments);
+  if (!probe.output.empty() && probe.output.back() != '\n')
+    probe.output.push_back('\n');
+  if (probe.code != 0)
+    fail("unable to verify GNU tar metadata support" +
+         (probe.output.empty() ? std::string() : ":\n" + probe.output));
+  if (probe.output.empty()) return;
+  const std::string message =
+      "GNU tar cannot preserve all requested filesystem metadata:\n" +
+      probe.output;
+  if (!force) fail(message + "Use --force to accept metadata loss.");
+  std::cerr << "Warning: " << message
+            << "Continuing because --force was specified.\n";
+}
+
 }  // namespace
 
 int ArchiveAction::perform(const PackConfig& config) {
@@ -117,6 +137,8 @@ int ArchiveAction::perform(const PackConfig& config) {
   if (isWithin(root, archive)) fail("archive destination must be outside ROOT");
   if (!fs::is_directory(archive.parent_path()))
     fail("archive destination directory does not exist");
+  const std::string tar = tarPath();
+  requireMetadataSupport(tar, config.force);
 
   auto stored = meta::readIdMap(root);
   if (!stored.error.empty()) fail("idmap: " + stored.error);
@@ -127,7 +149,7 @@ int ArchiveAction::perform(const PackConfig& config) {
   auto idmap = resolvedMap(root, stored.plan.mode,
                            util::subordinateIdCount(stored.plan), false);
 
-  std::vector<std::string> arguments{tarPath(),
+  std::vector<std::string> arguments{tar,
                                      "--create",
                                      "--auto-compress",
                                      "--format=pax",
@@ -151,6 +173,7 @@ int ArchiveAction::perform(const UnpackConfig& config) {
   if (isWithin(root, archive)) fail("archive source must be outside ROOT");
   if (fs::exists(root) && rootfsHasPayload(root))
     fail("ROOT must be empty before unpacking");
+  requireMetadataSupport(tar, config.force);
 
   const auto mode = config.native ? util::IdMapMode::Native
                                   : util::IdMapMode::Rich;

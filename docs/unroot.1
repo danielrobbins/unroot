@@ -114,6 +114,8 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 .PP
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host\-specific top\-level \fB\&.unroot\fR tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 .PP
+Before modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced\-fidelity result. Use \fB\-\-force\fR to proceed only when that metadata loss is understood and acceptable.
+.PP
 Unpacking is intentionally not an overlay operation: \fIROOT\fR must be new or empty apart from valid \fB\&.unroot\fR metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host\-capability checks complete before \fIROOT\fR is created or modified.
 .SH EXECUTION MODEL
 .SS Command selection
@@ -200,6 +202,9 @@ Enter an unmanaged rootfs with a single UID and GID mapping. The invoking host u
 .TP
 \fB\-\-native\fR
 Enter an unmanaged host\-owned rootfs, or create a native rootfs with \fBunpack\fR\&. Requires host root privileges. It conflicts with a managed rich ownership record.
+.TP
+\fB\-\-force\fR
+Allow \fBpack\fR or \fBunpack\fR to continue when the host GNU tar reports that requested extended filesystem metadata cannot be preserved. The capability warning is still displayed. This option does not override tar execution errors.
 .TP
 \fB\-\-cwd DIRECTORY\fR
 Set the command's working directory. With \fBenter\fR, the path is interpreted inside \fIROOT\fR; with \fBsingle\fR, it is interpreted in the visible host filesystem.

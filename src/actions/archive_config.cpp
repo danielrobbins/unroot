@@ -14,6 +14,9 @@ namespace actions {
 void PackConfig::configure_parser() {
   ActionConfig::configure_parser();
   parser_
+      .add_flag_meta(
+          {"--force"}, "Continue when GNU tar cannot preserve all metadata",
+          [this]() { force = true; })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
       .add_positional_meta("ROOT", "Mapped root filesystem to archive",
                            [this](const std::string& value) { root = value; })
@@ -46,6 +49,9 @@ void UnpackConfig::configure_parser() {
           {"--native"},
           "Preserve host-native ownership instead of using subordinate IDs",
           [this]() { native = true; })
+      .add_flag_meta(
+          {"--force"}, "Continue when GNU tar cannot preserve all metadata",
+          [this]() { force = true; })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
       .add_positional_meta(
           "ARCHIVE", "Source tar archive",

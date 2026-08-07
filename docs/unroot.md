@@ -100,6 +100,8 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 
+Before modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced-fidelity result. Use `--force` to proceed only when that metadata loss is understood and acceptable.
+
 Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host-capability checks complete before *ROOT* is created or modified.
 
 ## EXECUTION MODEL
@@ -193,6 +195,10 @@ Enter an unmanaged rootfs with a single UID and GID mapping. The invoking host u
 ### --native
 
 Enter an unmanaged host-owned rootfs, or create a native rootfs with `unpack`. Requires host root privileges. It conflicts with a managed rich ownership record.
+
+### --force
+
+Allow `pack` or `unpack` to continue when the host GNU tar reports that requested extended filesystem metadata cannot be preserved. The capability warning is still displayed. This option does not override tar execution errors.
 
 ### --cwd DIRECTORY
 

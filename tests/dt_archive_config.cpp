@@ -15,6 +15,15 @@ TEST_CASE("pack parses source and destination in transfer order") {
   CHECK(config.archive == "rootfs.tar.zst");
 }
 
+TEST_CASE("pack accepts explicit metadata-loss override") {
+  ToBeParsedArgs args;
+  args.action_name = "pack";
+  args.args = {"root", "rootfs.tar.zst", "--force"};
+  PackConfig config;
+  config.parse(args);
+  CHECK(config.force);
+}
+
 TEST_CASE("unpack defaults new rootfs trees to rich mapping") {
   ToBeParsedArgs args;
   args.action_name = "unpack";
@@ -33,6 +42,15 @@ TEST_CASE("unpack accepts explicit native ownership") {
   UnpackConfig config;
   config.parse(args);
   CHECK(config.native);
+}
+
+TEST_CASE("unpack accepts explicit metadata-loss override") {
+  ToBeParsedArgs args;
+  args.action_name = "unpack";
+  args.args = {"input.tar", "root", "--force"};
+  UnpackConfig config;
+  config.parse(args);
+  CHECK(config.force);
 }
 
 TEST_CASE("unpack no longer exposes ownership-shape selection") {
