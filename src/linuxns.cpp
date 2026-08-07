@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 #include <fcntl.h>
 #include <unistd.h>
@@ -320,7 +321,7 @@ static bool setupPreChrootBinds(const util::Rootfs& root,
     if (!bindRootfsTarget(root, "/dev/zero", "/dev/zero", false, false,
                           false, "bind:/dev/zero", true, "minimal dev"))
       return false;
-    for (const char* device : {"tty", "console", "random", "urandom", "ptmx"}) {
+    for (const char* device : {"full", "tty", "console", "random", "urandom", "ptmx"}) {
       std::string path = std::string("/dev/") + device;
       std::string step = std::string("bind:") + path;
       (void)bindRootfsTarget(root, path.c_str(), path, false, false, false,
@@ -403,8 +404,23 @@ static void setupPostChrootMounts(const NsOptions& opt, bool hostVisible) {
     recordStep("mount:tmpfs:/run", ok, false, "non-fatal runtime dir");
   }
   // removed: tmpfs /tmp mount
-  // Helpful symlinks under /dev and /etc
-  // Drop deprecated /dev symlink steps entirely.
+  // Conventional /dev links used by shells and build tools.
+  if (!hostVisible) {
+    for (const auto& link : {
+             std::pair{"/dev/fd", "/proc/self/fd"},
+             std::pair{"/dev/stdin", "/proc/self/fd/0"},
+             std::pair{"/dev/stdout", "/proc/self/fd/1"},
+             std::pair{"/dev/stderr", "/proc/self/fd/2"},
+         }) {
+      struct stat st{};
+      if (::lstat(link.first, &st) != 0) {
+        bool ok = (::symlink(link.second, link.first) == 0);
+        std::string step = std::string("link:") + link.first;
+        recordStep(step.c_str(), ok, false, "minimal dev compatibility link");
+      }
+    }
+  }
+  // Helpful symlink under /etc.
   // Only create /etc/mtab symlink if it doesn't already exist.
   if (opt.linkMtab && !hostVisible) {
     struct stat st{};

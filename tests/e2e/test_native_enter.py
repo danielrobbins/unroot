@@ -201,6 +201,65 @@ def test_managed_rooted_execution(unroot: UnrootRunner, managed_rootfs: Path) ->
     assert result.stdout == "0:/tmp:ok"
 
 
+def test_native_rootfs_has_usable_minimal_devices(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    rootfs = create_rootfs(tmp_path / "minimal-dev", find_static_busybox())
+    result = run_command(
+        [
+            *privileged_prefix,
+            str(unroot.binary),
+            "enter",
+            "--native",
+            str(rootfs),
+            "--",
+            "/bin/busybox",
+            "sh",
+            "-c",
+            """
+set -eu
+test -c /dev/null
+test -c /dev/full
+test -L /dev/fd
+test -L /dev/stdin
+test -L /dev/stdout
+test -L /dev/stderr
+exec 3</dev/null
+cat /dev/fd/3
+printf minimal-dev-ok >/dev/stdout
+""",
+        ]
+    ).assert_ok()
+
+    assert result.stdout == "minimal-dev-ok"
+
+
+def test_native_rootfs_shares_host_resolver_files(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    rootfs = create_rootfs(tmp_path / "resolver-files", find_static_busybox())
+    for name in ("resolv.conf", "hosts"):
+        result = run_command(
+            [
+                *privileged_prefix,
+                str(unroot.binary),
+                "enter",
+                "--native",
+                str(rootfs),
+                "--",
+                "/bin/busybox",
+                "cat",
+                f"/etc/{name}",
+            ]
+        ).assert_ok()
+
+        assert result.stdout == Path(f"/etc/{name}").read_text(encoding="utf-8")
+
+
 def test_qemu_overrides_reject_native_targets(
     unroot: UnrootRunner, managed_rootfs: Path
 ) -> None:
