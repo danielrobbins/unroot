@@ -38,7 +38,15 @@ util::IdMapPlan EnterAction::resolveIdMap(const EnterConfig& config) {
             util::make_error(util::LibErr::Invalid, 0, std::move(message)),
             "idmap");
     };
-    if (config.single) return util::makeSingleIdMap(::getuid(), ::getgid());
+    if (config.singleId) {
+        if (!config.root.empty()) {
+            auto stored = meta::readIdMap(config.root);
+            if (!stored.error.empty()) fail(stored.error);
+            if (stored.found)
+                fail("--single conflicts with the ownership mode recorded for ROOT");
+        }
+        return util::makeSingleIdMap(::getuid(), ::getgid());
+    }
 
     auto stored = meta::readIdMap(config.root);
     if (!stored.error.empty()) fail(stored.error);
@@ -86,7 +94,7 @@ std::unique_ptr<EmuPlan> EnterAction::setupEmulation(
     util::hostLogStep("exec:first", true, command);
 
     emulation::Settings settings;
-    settings.single = config.single;
+    settings.hostVisible = config.hostVisible;
     settings.native = idmap.mode == util::IdMapMode::Native;
     settings.root = config.root;
     settings.executable = config.targetExecutable;

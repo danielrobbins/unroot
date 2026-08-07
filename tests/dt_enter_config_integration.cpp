@@ -75,10 +75,27 @@ TEST_CASE("SingleConfig accepts a command without ROOT") {
     ToBeParsedArgs tpa; tpa.args = {"--", "/bin/echo"};
     cfg.parse(tpa);
     cfg.validate();
-    CHECK(cfg.single);
+    CHECK(cfg.singleId);
+    CHECK(cfg.hostVisible);
     CHECK(cfg.root.empty());
     REQUIRE(cfg.shell.size() == 1);
     CHECK(cfg.shell[0] == "/bin/echo");
+}
+
+TEST_CASE("EnterConfig accepts read-only same-path and explicit mappings") {
+    EnterConfig cfg;
+    ToBeParsedArgs args;
+    args.args = {"/rootfs", "--map-ro", "/sys", "--map-ro",
+                 "/source:/destination", "--", "/bin/true"};
+    cfg.parse(args);
+
+    REQUIRE(cfg.maps.size() == 2);
+    CHECK(cfg.maps[0].src == "/sys");
+    CHECK(cfg.maps[0].dst == "/sys");
+    CHECK(cfg.maps[0].readonly);
+    CHECK(cfg.maps[1].src == "/source");
+    CHECK(cfg.maps[1].dst == "/destination");
+    CHECK(cfg.maps[1].readonly);
 }
 
 TEST_CASE("EnterConfig integration: ROOT is required") {

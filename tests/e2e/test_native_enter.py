@@ -86,6 +86,48 @@ def test_single_user_mapping(unroot: UnrootRunner) -> None:
     assert result.stdout.strip() == "0"
 
 
+def test_enter_single_changes_root_with_one_id_mapping(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-root", busybox)
+    (root / "inside-root").write_text("rooted-single-ok", encoding="utf-8")
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        'printf "%s:" "$(id -u)"; cat /inside-root',
+    ).assert_ok()
+
+    assert result.stdout == "0:rooted-single-ok"
+
+
+def test_enter_single_rejects_managed_ownership(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter", "--single", str(managed_rootfs), "--", "/bin/busybox", "true"
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert (
+        "--single conflicts with the ownership mode recorded for ROOT"
+        in result.stderr
+    )
+
+
 def test_single_user_mapping_does_not_require_host_helper(
     unroot: UnrootRunner, tmp_path: Path
 ) -> None:
@@ -526,22 +568,32 @@ def test_rooted_absolute_executable_symlink(
 
 
 def test_readonly_file_map_rejects_writes(
-    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
 ) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for read-only mapping coverage",
+    )
+    root = create_rootfs(tmp_path / "single-root", busybox)
     source = tmp_path / "mapped-source"
     source.write_text("host-content\n", encoding="utf-8")
 
     unroot.run(
         "enter",
-        str(managed_rootfs),
+        "--single",
+        str(root),
         "--map-ro",
-        f"{source}:/tmp/mapped-source",
+        str(source),
         "--",
         "/bin/busybox",
         "sh",
         "-c",
-        'test "$(cat /tmp/mapped-source)" = host-content && '
-        "! printf changed > /tmp/mapped-source",
+        'test "$(cat "$1")" = host-content && ! printf changed > "$1"',
+        "sh",
+        str(source),
     ).assert_ok()
 
     assert source.read_text(encoding="utf-8") == "host-content\n"

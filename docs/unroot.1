@@ -12,6 +12,8 @@ A \fImanaged rootfs\fR created by \fBunroot unpack\fR uses a rich subordinate UI
 .IP "\(bu" 4
 A \fInative rootfs\fR uses host ownership directly. Create one with \fBsudo unroot unpack \-\-native\fR, or explicitly enter an existing host\-owned or mounted rootfs with \fBsudo unroot enter \-\-native\fR\&.
 .IP "\(bu" 4
+\fBunroot enter \-\-single ROOT\fR enters an unmanaged rootfs with only the invoking UID and GID mapped to namespace ID 0. It requires no subordinate IDs, but cannot represent multiple rootfs identities.
+.IP "\(bu" 4
 \fBunroot single\fR does not enter a rootfs. It gives one command namespace root capabilities while leaving the host filesystem visible.
 .PP
 These modes are intentionally not fallbacks for one another. A multi\-user rootfs is never silently reduced to one identity, and a request for unprivileged operation never silently becomes a host\-root operation.
@@ -19,6 +21,8 @@ These modes are intentionally not fallbacks for one another. A multi\-user rootf
 In practical terms, \fBunroot\fR supports several useful workflows:
 .IP "\(bu" 4
 \fIZero\-configuration build isolation.\fR \fBunroot single\fR places a trusted source build inside private user, mount, and PID namespaces without requiring a rootfs image, daemon, or project\-specific container configuration. The host filesystem and network remain available, so this is a clean namespace boundary for normal build work rather than a security sandbox for hostile code.
+.IP "\(bu" 4
+\fIA single\-owner rootfs without host root.\fR \fBunroot enter \-\-single ROOT\fR changes \fB/\fR while mapping only the invoking host user and group to root. It is useful for rootfs trees whose relevant files all belong to that user; a real multi\-user rootfs requires rich ownership instead.
 .IP "\(bu" 4
 \fIA sudo\-less chroot.\fR Configure subordinate IDs once, create a rootfs with \fBunroot unpack\fR, and enter it later without \fBsudo\fR\&. UID and GID 0 map to the invoking user; the remaining rootfs identities map to the user's subordinate ranges.
 .IP "\(bu" 4
@@ -37,6 +41,7 @@ In practical terms, \fBunroot\fR supports several useful workflows:
 unroot unpack ARCHIVE ROOT
 sudo unroot unpack \-\-native ARCHIVE ROOT
 unroot enter ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
+unroot enter \-\-single ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 sudo unroot enter \-\-native ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 unroot single [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 unroot pack ROOT ARCHIVE
@@ -79,6 +84,15 @@ Use single\-identity namespace capabilities without changing the filesystem root
 $ unroot single \-\- /usr/bin/id
 .fi
 .RE
+.PP
+Enter an unmanaged, single\-owner rootfs without subordinate ID allocations:
+.RS 4
+.nf
+$ unroot enter \-\-single \(ti/rootfs \-\- /bin/sh
+.fi
+.RE
+.PP
+Only files owned by the invoking host user and group appear as root\-owned in this mode. Use a managed rich root when the rootfs must represent other users or groups.
 .PP
 Capture a managed rootfs after modifying it:
 .RS 4
@@ -137,19 +151,21 @@ A managed rootfs has an authoritative ownership record in \fB\&.unroot/meta.json
 \fIRich ownership\fR uses a user namespace. Rootfs ID 0 maps to the invoking host user, and one contiguous subordinate range represents IDs 1 through 65535. \fBunroot unpack\fR creates this mode by default.
 .IP "\(bu" 4
 \fINative ownership\fR uses host IDs unchanged and does not create a user namespace. \fBsudo unroot unpack \-\-native\fR creates this mode.
+.IP "\(bu" 4
+\fISingle\-ID ownership\fR maps only the invoking UID and GID to namespace ID 0. Request it explicitly for an unmanaged rootfs with \fBunroot enter \-\-single ROOT\fR\&.
 .PP
 \fBunroot enter ROOT\fR reads the stored mode before namespace creation. A rich root must still belong to the same host UID and GID, and its exact subordinate ranges must remain assigned. A native root requires host root privileges. Unroot never silently chooses a replacement map, rewrites ownership, or changes modes.
 .PP
-An existing rootfs with no metadata is not guessed. Use \fBsudo unroot enter \-\-native ROOT\fR to state that its host\-visible ownership is intentional. This unmanaged entry does not create \fB\&.unroot\fR metadata. Use \fBunroot unpack\fR when a portable managed rootfs is desired.
+An existing rootfs with no metadata is not guessed. Use \fBunroot enter \-\-single ROOT\fR for a single\-owner tree, or \fBsudo unroot enter \-\-native ROOT\fR to state that its host\-visible ownership is intentional. Neither unmanaged form creates \fB\&.unroot\fR metadata. Use \fBunroot unpack\fR when a portable managed rootfs is desired.
 .PP
-\fBunroot single\fR is separate from both rooted modes. It maps only the invoking UID and GID to namespace ID 0 for the current invocation and leaves the host filesystem visible. It is useful for build isolation but cannot faithfully represent a multi\-user rootfs.
+The standalone \fBunroot single\fR action uses the same one\-ID mapping but does not enter a rootfs: it leaves the host filesystem visible. Both single\-ID forms are useful when one identity is sufficient, but neither can faithfully represent a multi\-user rootfs.
 .PP
 Rich ownership requires suitable subordinate\-ID allocations and the \fBunroot\-util\fR, \fBnewuidmap\fR, and \fBnewgidmap\fR helpers. \fBunroot\-util\fR must be installed beside \fBunroot\fR\&. When built with libsubid, it uses the host's configured subordinate\-ID provider; otherwise it reads \fB/etc/subuid\fR and \fB/etc/subgid\fR directly. The initial release requires one contiguous subordinate UID range and one contiguous subordinate GID range of at least 65535 IDs.
 .SS Filesystem setup
 .PP
 Rooted entry prepares a private mount tree, enters \fIROOT\fR with \fBchroot(2)\fR, mounts a private \fB/proc\fR, and performs the enabled minimal filesystem setup described under \fBMOUNT FEATURES\fR\&. Both rich and native entry retain private mount and PID namespaces.
 .PP
-\fB\-\-map\fR bind\-mounts an absolute host path at the same absolute path inside the root filesystem. \fB\-\-map\-ro\fR accepts \fISOURCE:DESTINATION\fR and requires the resulting bind mount to be read\-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to \fBenter\fR\&.
+\fB\-\-map\fR bind\-mounts an absolute host path at the same absolute path inside the root filesystem. \fB\-\-map\-ro\fR accepts either \fISOURCE\fR for the same\-path shorthand or \fISOURCE:DESTINATION\fR for an explicit destination, and requires the resulting bind mount to be read\-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to \fBenter\fR\&.
 .PP
 \fBsingle\fR keeps the host filesystem visible and avoids creating or replacing host mount targets. Its optional \fB/proc\fR work occurs only in the private mount namespace.
 .SS Foreign\-architecture execution
@@ -169,12 +185,18 @@ Private \fBbinfmt_misc\fR instances require Linux 6.7 or newer and permission fr
 .PP
 \fBunroot\fR is intended for root filesystems and commands that you trust. It is not a sandbox for hostile code.
 .PP
-Rich roots and \fBsingle\fR use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host\-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.
+Rich roots, rooted \fB\-\-single\fR, and the standalone \fBsingle\fR action use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host\-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.
 .PP
 Every mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.
 .PP
 Explicit bind mappings and selected resolver or device resources remain backed by host resources. \fBUNROOT_FEATURES=+devbind\fR exposes the complete host \fB/dev\fR tree and should be enabled only when that access is intended.
+.TP
+\fB\-\-map\-ro SOURCE[:DESTINATION]\fR
+Bind an absolute host path inside \fIROOT\fR, then make that mount and any nested mounts read\-only. With no destination, the source is mounted at the same absolute path. May be repeated.
 .SH OPTIONS
+.TP
+\fB\-\-single\fR
+Enter an unmanaged rootfs with a single UID and GID mapping. The invoking host user and group become namespace ID 0; no subordinate IDs are required. This mode conflicts with \fB\-\-native\fR and with any ownership metadata already recorded for \fIROOT\fR\&.
 .TP
 \fB\-\-native\fR
 Enter an unmanaged host\-owned rootfs, or create a native rootfs with \fBunpack\fR\&. Requires host root privileges. It conflicts with a managed rich ownership record.
@@ -193,9 +215,6 @@ Do not supply Unroot's deterministic target \fBPATH\fR\&. Explicit \fB\-\-env\fR
 .TP
 \fB\-\-map PATH\fR
 Bind an absolute host path at the same path inside \fIROOT\fR\&. May be repeated.
-.TP
-\fB\-\-map\-ro SOURCE:DESTINATION\fR
-Bind an absolute host path at an absolute destination inside \fIROOT\fR, then make that mount and any nested mounts read\-only. May be repeated.
 .TP
 \fB\-\-emulation MODE\fR
 Set the foreign\-execution policy. \fBauto\fR, the default, uses a static QEMU user\-mode emulator when the target ELF architecture differs from the host. \fBnever\fR rejects a foreign target instead.
@@ -265,7 +284,7 @@ Use the global \fB\-\-debug\fR option for detailed structured setup events.
 After successful setup, \fBunroot\fR returns the target command's exit status. Commands terminated by a signal use the conventional \fB128 + signal\fR result. \fBpack\fR and \fBunpack\fR return GNU tar's result after namespace setup. Argument, namespace, ownership, mount, archive, emulation, and execution setup failures return a nonzero status with a diagnostic on standard error.
 .SH REQUIREMENTS
 .PP
-\fBsingle\fR and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer\-container policy.
+Rooted \fB\-\-single\fR, the standalone \fBsingle\fR action, and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer\-container policy.
 .PP
 Rich ownership additionally requires \fBunroot\-util\fR installed beside \fBunroot\fR, \fB/usr/bin/newuidmap\fR, \fB/usr/bin/newgidmap\fR, and a subordinate UID and GID allocation from the host's configured provider. Builds without libsubid support use \fB/etc/subuid\fR and \fB/etc/subgid\fR directly.
 .PP

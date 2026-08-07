@@ -19,7 +19,8 @@ public:
     
     // Core rootfs properties (mutable for lazy initialization)
     mutable std::string root;
-    mutable bool single = false;
+    mutable bool singleId = false;
+    mutable bool hostVisible = false;
     mutable bool native = false;
     mutable emulation::Policy emulationPolicy = emulation::Policy::Auto;
     mutable bool emulationSpecified = false;
@@ -77,7 +78,7 @@ class SingleConfig : public EnterConfig {
 public:
     using ActionClass = EnterAction;
 
-    SingleConfig() { single = true; }
+    SingleConfig() { singleId = true; hostVisible = true; }
     std::string getActionName() const override { return "single"; }
     static int handle(const ToBeParsedArgs& args);
 

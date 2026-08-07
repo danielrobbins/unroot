@@ -29,6 +29,9 @@ void EnterConfig::configure_parser() {
     ActionConfig::configure_parser();
     configureExecutionOptions();
     parser_
+        .add_flag_meta({"--single"},
+            "Enter an unmanaged rootfs with one UID/GID mapping",
+            [this]() { singleId = true; })
         .add_flag_meta({"--native"},
             "Use host ownership and host root privileges for an unmanaged rootfs",
             [this]() { native = true; })
@@ -57,8 +60,8 @@ void EnterConfig::configure_parser() {
             BindMap bm; bm.src = v; bm.dst = v; bm.readonly = false;
             maps.push_back(std::move(bm));
         })
-        .add_multi_option_meta({"--map-ro"}, "<src:dst>",
-            "Bind an absolute host path at dst read-only (repeatable)",
+        .add_multi_option_meta({"--map-ro"}, "<src[:dst]>",
+            "Bind an absolute host path read-only, optionally at dst (repeatable)",
             [this](const std::string& v) { addBindMap(v, true); })
         .add_positional_meta("ROOT", "Root filesystem path",
             [this](const std::string& path) { root = path; });
@@ -99,13 +102,8 @@ void EnterConfig::postParse(const OptionParser::ParseResult& result) {
 
 void EnterConfig::addBindMap(const std::string& spec, bool readonly) const {
     auto pos = spec.find(':');
-    if (pos == std::string::npos) {
-        throw AppException(util::make_error(util::LibErr::Invalid, 0, 
-            std::string("invalid map spec (expected src:dst): ") + spec), "usage");
-    }
-    
-    std::string src = spec.substr(0, pos);
-    std::string dst = spec.substr(pos + 1);
+    std::string src = pos == std::string::npos ? spec : spec.substr(0, pos);
+    std::string dst = pos == std::string::npos ? spec : spec.substr(pos + 1);
     
     if (src.empty() || src[0] != '/' || dst.empty() || dst[0] != '/') {
         throw AppException(util::make_error(util::LibErr::Invalid, 0, 
@@ -168,7 +166,7 @@ void EnterConfig::validate() const {
 }
 
 void EnterConfig::validateRootfs() const {
-    if (single) {
+    if (hostVisible) {
         if (!root.empty())
             throw AppException(util::make_error(
                 util::LibErr::Invalid, 0, "single does not accept a rootfs"),
@@ -179,6 +177,11 @@ void EnterConfig::validateRootfs() const {
         throw AppException(util::make_error(util::LibErr::Invalid, 0, 
             "enter requires ROOT"), "usage");
     }
+
+    if (singleId && native)
+        throw AppException(util::make_error(
+            util::LibErr::Invalid, 0,
+            "--single and --native are mutually exclusive"), "usage");
 
     if (native && ::geteuid() != 0)
         throw AppException(util::make_error(
@@ -291,9 +294,9 @@ namespace {
         actions::ActionRegistry::register_action(
             "enter",
             actions::EnterConfig::handle,
-            "Enter an initialized root filesystem environment",
-            "Uses the ownership mode recorded in ROOT/.unroot/meta.json; "
-            "--native explicitly enters an unmanaged host-owned rootfs.",
+            "Enter a root filesystem environment",
+            "Uses ROOT ownership metadata by default; --single and --native "
+            "explicitly select unmanaged single-ID or host ownership.",
             "ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]",
             []() { return std::make_unique<actions::EnterConfig>(); }
         );

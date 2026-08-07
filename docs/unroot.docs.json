@@ -7,7 +7,7 @@
       "title": "unroot",
       "short_help": "unroot - enter, run, and transport Linux root filesystems",
       "syntax": "",
-      "description": "`unroot` is a small, daemonless tool for trusted build, packaging, cross-architecture, and rootfs-maintenance work. It combines Linux namespaces, durable ownership metadata, and optional QEMU user-mode emulation without requiring a resident container service.\n\nRoot filesystem ownership is explicit:\n\n* A *managed rootfs* created by `unroot unpack` uses a rich subordinate UID and GID map by default. It preserves normal multi-user ownership while ordinary entry remains unprivileged.\n* A *native rootfs* uses host ownership directly. Create one with `sudo unroot unpack --native`, or explicitly enter an existing host-owned or mounted rootfs with `sudo unroot enter --native`.\n* `unroot single` does not enter a rootfs. It gives one command namespace root capabilities while leaving the host filesystem visible.\n\nThese modes are intentionally not fallbacks for one another. A multi-user rootfs is never silently reduced to one identity, and a request for unprivileged operation never silently becomes a host-root operation.\n\nIn practical terms, `unroot` supports several useful workflows:\n\n* *Zero-configuration build isolation.* `unroot single` places a trusted source build inside private user, mount, and PID namespaces without requiring a rootfs image, daemon, or project-specific container configuration. The host filesystem and network remain available, so this is a clean namespace boundary for normal build work rather than a security sandbox for hostile code.\n* *A sudo-less chroot.* Configure subordinate IDs once, create a rootfs with `unroot unpack`, and enter it later without `sudo`. UID and GID 0 map to the invoking user; the remaining rootfs identities map to the user's subordinate ranges.\n* *A direct chroot replacement.* `--native` operates on ordinary host-owned filesystems, NFS-mounted root filesystems, and disposable VM roots without shifting ownership. It requires host root privileges because it deliberately does not create a user namespace.\n* *Cross-architecture development.* Enter ARM64 from x86-64, x86-64 from ARM64, or RISC-V from either. `unroot` inspects the requested executable or shebang interpreter and connects it to the matching static QEMU user-mode emulator.\n* *Portable rootfs workflows.* `unpack` restores a complete rootfs under its chosen ownership model; `pack` captures it again while preserving numeric owners and extended filesystem metadata.\n* *Single-process rootfs execution.* Run one command with a different `/` and private PID and mount state, with no resident container daemon. This is useful for trusted services, build steps, and maintenance tools.\n* *Architecture and distribution testing.* Keep a collection of rootfs archives and exercise software against multiple Linux environments without booting a VM for each one.",
+      "description": "`unroot` is a small, daemonless tool for trusted build, packaging, cross-architecture, and rootfs-maintenance work. It combines Linux namespaces, durable ownership metadata, and optional QEMU user-mode emulation without requiring a resident container service.\n\nRoot filesystem ownership is explicit:\n\n* A *managed rootfs* created by `unroot unpack` uses a rich subordinate UID and GID map by default. It preserves normal multi-user ownership while ordinary entry remains unprivileged.\n* A *native rootfs* uses host ownership directly. Create one with `sudo unroot unpack --native`, or explicitly enter an existing host-owned or mounted rootfs with `sudo unroot enter --native`.\n* `unroot enter --single ROOT` enters an unmanaged rootfs with only the invoking UID and GID mapped to namespace ID 0. It requires no subordinate IDs, but cannot represent multiple rootfs identities.\n* `unroot single` does not enter a rootfs. It gives one command namespace root capabilities while leaving the host filesystem visible.\n\nThese modes are intentionally not fallbacks for one another. A multi-user rootfs is never silently reduced to one identity, and a request for unprivileged operation never silently becomes a host-root operation.\n\nIn practical terms, `unroot` supports several useful workflows:\n\n* *Zero-configuration build isolation.* `unroot single` places a trusted source build inside private user, mount, and PID namespaces without requiring a rootfs image, daemon, or project-specific container configuration. The host filesystem and network remain available, so this is a clean namespace boundary for normal build work rather than a security sandbox for hostile code.\n* *A single-owner rootfs without host root.* `unroot enter --single ROOT` changes `/` while mapping only the invoking host user and group to root. It is useful for rootfs trees whose relevant files all belong to that user; a real multi-user rootfs requires rich ownership instead.\n* *A sudo-less chroot.* Configure subordinate IDs once, create a rootfs with `unroot unpack`, and enter it later without `sudo`. UID and GID 0 map to the invoking user; the remaining rootfs identities map to the user's subordinate ranges.\n* *A direct chroot replacement.* `--native` operates on ordinary host-owned filesystems, NFS-mounted root filesystems, and disposable VM roots without shifting ownership. It requires host root privileges because it deliberately does not create a user namespace.\n* *Cross-architecture development.* Enter ARM64 from x86-64, x86-64 from ARM64, or RISC-V from either. `unroot` inspects the requested executable or shebang interpreter and connects it to the matching static QEMU user-mode emulator.\n* *Portable rootfs workflows.* `unpack` restores a complete rootfs under its chosen ownership model; `pack` captures it again while preserving numeric owners and extended filesystem metadata.\n* *Single-process rootfs execution.* Run one command with a different `/` and private PID and mount state, with no resident container daemon. This is useful for trusted services, build steps, and maintenance tools.\n* *Architecture and distribution testing.* Keep a collection of rootfs archives and exercise software against multiple Linux environments without booting a VM for each one.",
       "metadata": {
         "title": "unroot",
         "priority": "0"
@@ -19,7 +19,7 @@
       "title": "SYNOPSIS",
       "short_help": "SYNOPSIS",
       "syntax": "",
-      "description": "```text\nunroot unpack ARCHIVE ROOT\nsudo unroot unpack --native ARCHIVE ROOT\nunroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nsudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot single [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot pack ROOT ARCHIVE\n```",
+      "description": "```text\nunroot unpack ARCHIVE ROOT\nsudo unroot unpack --native ARCHIVE ROOT\nunroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nsudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot single [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot pack ROOT ARCHIVE\n```",
       "metadata": {
         "priority": "10"
       }
@@ -30,7 +30,7 @@
       "title": "QUICK START",
       "short_help": "QUICK START",
       "syntax": "",
-      "description": "Create a faithful multi-user rootfs from an archive, then enter it:\n\n```console\n$ unroot unpack alpine.tar.zst ~/rootfs\n$ unroot enter ~/rootfs\n```\n\n`unpack` requires subordinate UID and GID allocations. It checks the allocation and mapping helpers before creating *ROOT*, so an incomplete host setup does not leave behind a partially initialized destination.\n\nRun a specific command with an explicit environment:\n\n```console\n$ unroot enter ~/rootfs \\\n    --cwd /build \\\n    --env MAKEFLAGS=-j8 \\\n    -- make\n```\n\nEnter an existing host-owned or NFS-mounted Raspberry Pi rootfs from an x86-64 workstation:\n\n```console\n$ sudo unroot enter --native /mnt/raspi4-root -- /bin/sh\n```\n\nThe explicit `--native` selects host ownership and authorizes any host-global foreign-execution setup required for this boot. The rootfs is not modified with Unroot metadata merely because it was entered.\n\nUse single-identity namespace capabilities without changing the filesystem root:\n\n```console\n$ unroot single -- /usr/bin/id\n```\n\nCapture a managed rootfs after modifying it:\n\n```console\n$ unroot pack ~/rootfs alpine-modified.tar.zst\n```\n\nThe archive is host-independent, while its binaries retain the rootfs's target architecture. On another supported Linux host, `unroot` either runs them natively or selects the matching QEMU emulator.",
+      "description": "Create a faithful multi-user rootfs from an archive, then enter it:\n\n```console\n$ unroot unpack alpine.tar.zst ~/rootfs\n$ unroot enter ~/rootfs\n```\n\n`unpack` requires subordinate UID and GID allocations. It checks the allocation and mapping helpers before creating *ROOT*, so an incomplete host setup does not leave behind a partially initialized destination.\n\nRun a specific command with an explicit environment:\n\n```console\n$ unroot enter ~/rootfs \\\n    --cwd /build \\\n    --env MAKEFLAGS=-j8 \\\n    -- make\n```\n\nEnter an existing host-owned or NFS-mounted Raspberry Pi rootfs from an x86-64 workstation:\n\n```console\n$ sudo unroot enter --native /mnt/raspi4-root -- /bin/sh\n```\n\nThe explicit `--native` selects host ownership and authorizes any host-global foreign-execution setup required for this boot. The rootfs is not modified with Unroot metadata merely because it was entered.\n\nUse single-identity namespace capabilities without changing the filesystem root:\n\n```console\n$ unroot single -- /usr/bin/id\n```\n\nEnter an unmanaged, single-owner rootfs without subordinate ID allocations:\n\n```console\n$ unroot enter --single ~/rootfs -- /bin/sh\n```\n\nOnly files owned by the invoking host user and group appear as root-owned in this mode. Use a managed rich root when the rootfs must represent other users or groups.\n\nCapture a managed rootfs after modifying it:\n\n```console\n$ unroot pack ~/rootfs alpine-modified.tar.zst\n```\n\nThe archive is host-independent, while its binaries retain the rootfs's target architecture. On another supported Linux host, `unroot` either runs them natively or selects the matching QEMU emulator.",
       "metadata": {
         "priority": "20"
       }
@@ -87,7 +87,7 @@
       "title": "Rootfs ownership",
       "short_help": "Rootfs ownership",
       "syntax": "",
-      "description": "A managed rootfs has an authoritative ownership record in `.unroot/meta.json`:\n\n* *Rich ownership* uses a user namespace. Rootfs ID 0 maps to the invoking host user, and one contiguous subordinate range represents IDs 1 through 65535. `unroot unpack` creates this mode by default.\n* *Native ownership* uses host IDs unchanged and does not create a user namespace. `sudo unroot unpack --native` creates this mode.\n\n`unroot enter ROOT` reads the stored mode before namespace creation. A rich root must still belong to the same host UID and GID, and its exact subordinate ranges must remain assigned. A native root requires host root privileges. Unroot never silently chooses a replacement map, rewrites ownership, or changes modes.\n\nAn existing rootfs with no metadata is not guessed. Use `sudo unroot enter --native ROOT` to state that its host-visible ownership is intentional. This unmanaged entry does not create `.unroot` metadata. Use `unroot unpack` when a portable managed rootfs is desired.\n\n`unroot single` is separate from both rooted modes. It maps only the invoking UID and GID to namespace ID 0 for the current invocation and leaves the host filesystem visible. It is useful for build isolation but cannot faithfully represent a multi-user rootfs.\n\nRich ownership requires suitable subordinate-ID allocations and the `unroot-util`, `newuidmap`, and `newgidmap` helpers. `unroot-util` must be installed beside `unroot`. When built with libsubid, it uses the host's configured subordinate-ID provider; otherwise it reads `/etc/subuid` and `/etc/subgid` directly. The initial release requires one contiguous subordinate UID range and one contiguous subordinate GID range of at least 65535 IDs.",
+      "description": "A managed rootfs has an authoritative ownership record in `.unroot/meta.json`:\n\n* *Rich ownership* uses a user namespace. Rootfs ID 0 maps to the invoking host user, and one contiguous subordinate range represents IDs 1 through 65535. `unroot unpack` creates this mode by default.\n* *Native ownership* uses host IDs unchanged and does not create a user namespace. `sudo unroot unpack --native` creates this mode.\n* *Single-ID ownership* maps only the invoking UID and GID to namespace ID 0. Request it explicitly for an unmanaged rootfs with `unroot enter --single ROOT`.\n\n`unroot enter ROOT` reads the stored mode before namespace creation. A rich root must still belong to the same host UID and GID, and its exact subordinate ranges must remain assigned. A native root requires host root privileges. Unroot never silently chooses a replacement map, rewrites ownership, or changes modes.\n\nAn existing rootfs with no metadata is not guessed. Use `unroot enter --single ROOT` for a single-owner tree, or `sudo unroot enter --native ROOT` to state that its host-visible ownership is intentional. Neither unmanaged form creates `.unroot` metadata. Use `unroot unpack` when a portable managed rootfs is desired.\n\nThe standalone `unroot single` action uses the same one-ID mapping but does not enter a rootfs: it leaves the host filesystem visible. Both single-ID forms are useful when one identity is sufficient, but neither can faithfully represent a multi-user rootfs.\n\nRich ownership requires suitable subordinate-ID allocations and the `unroot-util`, `newuidmap`, and `newgidmap` helpers. `unroot-util` must be installed beside `unroot`. When built with libsubid, it uses the host's configured subordinate-ID provider; otherwise it reads `/etc/subuid` and `/etc/subgid` directly. The initial release requires one contiguous subordinate UID range and one contiguous subordinate GID range of at least 65535 IDs.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "30"
@@ -99,7 +99,7 @@
       "title": "Filesystem setup",
       "short_help": "Filesystem setup",
       "syntax": "",
-      "description": "Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `MOUNT FEATURES`. Both rich and native entry retain private mount and PID namespaces.\n\n`--map` bind-mounts an absolute host path at the same absolute path inside the root filesystem. `--map-ro` accepts *SOURCE:DESTINATION* and requires the resulting bind mount to be read-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to `enter`.\n\n`single` keeps the host filesystem visible and avoids creating or replacing host mount targets. Its optional `/proc` work occurs only in the private mount namespace.",
+      "description": "Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `MOUNT FEATURES`. Both rich and native entry retain private mount and PID namespaces.\n\n`--map` bind-mounts an absolute host path at the same absolute path inside the root filesystem. `--map-ro` accepts either *SOURCE* for the same-path shorthand or *SOURCE:DESTINATION* for an explicit destination, and requires the resulting bind mount to be read-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to `enter`.\n\n`single` keeps the host filesystem visible and avoids creating or replacing host mount targets. Its optional `/proc` work occurs only in the private mount namespace.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "40"
@@ -123,7 +123,7 @@
       "title": "SECURITY MODEL",
       "short_help": "SECURITY MODEL",
       "syntax": "",
-      "description": "`unroot` is intended for root filesystems and commands that you trust. It is not a sandbox for hostile code.\n\nRich roots and `single` use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.\n\nEvery mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.\n\nExplicit bind mappings and selected resolver or device resources remain backed by host resources. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.",
+      "description": "`unroot` is intended for root filesystems and commands that you trust. It is not a sandbox for hostile code.\n\nRich roots, rooted `--single`, and the standalone `single` action use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.\n\nEvery mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.\n\nExplicit bind mappings and selected resolver or device resources remain backed by host resources. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.",
       "metadata": {
         "priority": "50"
       }
@@ -137,6 +137,18 @@
       "description": "",
       "metadata": {
         "priority": "60"
+      }
+    },
+    "option:enter.single": {
+      "kind": "option",
+      "name": "enter.single",
+      "title": "--single",
+      "short_help": "--single",
+      "syntax": "--single",
+      "description": "Enter an unmanaged rootfs with a single UID and GID mapping. The invoking host user and group become namespace ID 0; no subordinate IDs are required. This mode conflicts with `--native` and with any ownership metadata already recorded for *ROOT*.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "5"
       }
     },
     "option:enter.native": {
@@ -214,12 +226,12 @@
     "option:enter.map-ro": {
       "kind": "option",
       "name": "enter.map-ro",
-      "title": "--map-ro SOURCE:DESTINATION",
-      "short_help": "--map-ro SOURCE:DESTINATION",
-      "syntax": "--map-ro SOURCE:DESTINATION",
-      "description": "Bind an absolute host path at an absolute destination inside *ROOT*, then make that mount and any nested mounts read-only. May be repeated.",
+      "title": "--map-ro SOURCE",
+      "short_help": "--map-ro SOURCE",
+      "syntax": "--map-ro SOURCE[:DESTINATION]",
+      "description": "Bind an absolute host path inside *ROOT*, then make that mount and any nested mounts read-only. With no destination, the source is mounted at the same absolute path. May be repeated.",
       "metadata": {
-        "parent": "section:options",
+        ":DESTINATION] [parent": "section:options",
         "priority": "60"
       }
     },
@@ -430,7 +442,7 @@
       "title": "REQUIREMENTS",
       "short_help": "REQUIREMENTS",
       "syntax": "",
-      "description": "`single` and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer-container policy.\n\nRich ownership additionally requires `unroot-util` installed beside `unroot`, `/usr/bin/newuidmap`, `/usr/bin/newgidmap`, and a subordinate UID and GID allocation from the host's configured provider. Builds without libsubid support use `/etc/subuid` and `/etc/subgid` directly.\n\nNative ownership requires host root privileges and Linux mount and PID namespace support. `--map-ro` additionally requires `mount_setattr(2)`, available in Linux 5.12 or newer.\n\nPrivate foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.\n\n`pack` and `unpack` require GNU tar on the host `PATH`. Compressed output also requires the corresponding compression program selected by the archive suffix.",
+      "description": "Rooted `--single`, the standalone `single` action, and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer-container policy.\n\nRich ownership additionally requires `unroot-util` installed beside `unroot`, `/usr/bin/newuidmap`, `/usr/bin/newgidmap`, and a subordinate UID and GID allocation from the host's configured provider. Builds without libsubid support use `/etc/subuid` and `/etc/subgid` directly.\n\nNative ownership requires host root privileges and Linux mount and PID namespace support. `--map-ro` additionally requires `mount_setattr(2)`, available in Linux 5.12 or newer.\n\nPrivate foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.\n\n`pack` and `unpack` require GNU tar on the host `PATH`. Compressed output also requires the corresponding compression program selected by the archive suffix.",
       "metadata": {
         "priority": "100"
       }
@@ -565,8 +577,16 @@
       "children": []
     },
     {
+      "tag": "option:enter.map-ro",
+      "children": []
+    },
+    {
       "tag": "section:options",
       "children": [
+        {
+          "tag": "option:enter.single",
+          "children": []
+        },
         {
           "tag": "option:enter.native",
           "children": []
@@ -589,10 +609,6 @@
         },
         {
           "tag": "option:enter.map",
-          "children": []
-        },
-        {
-          "tag": "option:enter.map-ro",
           "children": []
         },
         {

@@ -127,6 +127,16 @@ or GID allocations. It's perfect for embedded systems where nearly every file
 is owned by root. If your build needs multiple users or service accounts, use
 a managed rich root instead.
 
+The same one-ID mapping can be used while changing the filesystem root. This is
+useful for an unmanaged rootfs whose relevant files all belong to your account:
+
+```bash
+unroot enter --single ~/roots/appliance -- /bin/sh
+```
+
+Inside that rootfs, your host UID and GID appear as `0`. Other identities cannot
+be represented, so this is deliberately not a fallback for a multi-user rootfs.
+
 ### Run one process inside another Linux environment
 
 You don't need a VM or container daemon just to run one program against a
@@ -185,7 +195,7 @@ daemon overhead, image formats, or orchestration complexity.
 **Kernel developers** — Run one process inside another userspace for testing,
 validation, or tooling without booting VMs or managing containers.
 
-## Three Explicit Modes
+## Explicit Ownership Modes
 
 Linux root filesystems don't all have the same ownership requirements. unroot
 keeps those choices explicit rather than guessing or silently falling back:
@@ -202,9 +212,14 @@ keeps those choices explicit rather than guessing or silently falling back:
   `sudo unroot unpack --native` or `sudo unroot enter --native` for host-owned,
   NFS-mounted, or existing rootfs trees. Conventional privileged chroot behavior.
 
-- **Single mode** — Runs a command as namespace root with the host filesystem
-  visible: `unroot single -- COMMAND`. Trusted builds needing namespace
-  capabilities without subordinate IDs. Not a substitute for multi-user ownership.
+- **Single-ID roots** — Enter an unmanaged rootfs with
+  `unroot enter --single ROOT`. Your host UID and GID map to root, with no
+  subordinate IDs required. This is useful for single-owner build roots, but
+  cannot represent multiple users or groups.
+
+The standalone `unroot single -- COMMAND` action uses the same one-ID mapping
+without changing `/`: the host filesystem remains visible. It is useful for
+trusted builds that need namespace-root capabilities rather than another rootfs.
 
 A rich operation never degrades to single-ID ownership, and an unprivileged
 operation never silently becomes native host-root execution.
@@ -237,11 +252,17 @@ Run a trusted build as namespace root:
 unroot single --persist-env PATH -- /usr/bin/make -j8
 ```
 
+Enter a single-owner rootfs without subordinate IDs:
+
+```bash
+unroot enter --single ~/roots/appliance -- /bin/sh
+```
+
 **Note:** To use managed rich roots (the default mode for `unpack` and `enter`),
 your account needs subordinate UID and GID ranges configured in
 `/etc/subuid` and `/etc/subgid`. This is a one-time host setup that enables
-unprivileged multi-user chroots. Native mode and single mode do not require
-subordinate IDs.
+unprivileged multi-user chroots. Native mode, rooted `--single`, and the
+standalone `single` action do not require subordinate IDs.
 
 To configure rich root support, add entries for your username (replace `drobbins`):
 
