@@ -102,33 +102,10 @@ system-wide for the current boot. This isn't cross-compilation: it's the
 Raspberry Pi userspace itself, executing on the larger machine. Build output is
 written directly to the mounted rootfs.
 
-### Become root for a trusted build without `sudo`
+### Enter a single-owner rootfs without `sudo`
 
-Some embedded and system builds expect to run as root even when they don't need
-root access to the host. `single` maps your ordinary UID and GID to `0` inside
-a private user namespace:
-
-```bash
-mkdir -p "$HOME/roots/appliance"
-unroot single \
-    --cwd "$PWD" \
-    --persist-env PATH \
-    --env DESTDIR="$HOME/roots/appliance" \
-    -- /bin/sh -c 'make -j32 && make install'
-```
-
-Inside the command, `id -u` returns `0`, root checks succeed, and you have
-namespace-root capabilities. On the host, you're still your ordinary user —
-mount and PID state stay private, and newly installed files remain manageable
-by your regular account.
-
-This mode needs an unprivileged user namespace but doesn't need subordinate UID
-or GID allocations. It's perfect for embedded systems where nearly every file
-is owned by root. If your build needs multiple users or service accounts, use
-a managed rich root instead.
-
-The same one-ID mapping can be used while changing the filesystem root. This is
-useful for an unmanaged rootfs whose relevant files all belong to your account:
+An unmanaged rootfs whose relevant files all belong to your account can use a
+single-ID mapping without subordinate UID or GID allocations:
 
 ```bash
 unroot enter --single ~/roots/appliance -- /bin/sh
@@ -217,10 +194,6 @@ keeps those choices explicit rather than guessing or silently falling back:
   subordinate IDs required. This is useful for single-owner build roots, but
   cannot represent multiple users or groups.
 
-The standalone `unroot single -- COMMAND` action uses the same one-ID mapping
-without changing `/`: the host filesystem remains visible. It is useful for
-trusted builds that need namespace-root capabilities rather than another rootfs.
-
 A rich operation never degrades to single-ID ownership, and an unprivileged
 operation never silently becomes native host-root execution.
 
@@ -246,12 +219,6 @@ host environment. Use `--persist-env` to copy selected host variables,
 `--env` to set explicit values, or `--no-default-env` when even the built-in
 `PATH` should be omitted.
 
-Run a trusted build as namespace root:
-
-```bash
-unroot single --persist-env PATH -- /usr/bin/make -j8
-```
-
 Enter a single-owner rootfs without subordinate IDs:
 
 ```bash
@@ -261,8 +228,8 @@ unroot enter --single ~/roots/appliance -- /bin/sh
 **Note:** To use managed rich roots (the default mode for `unpack` and `enter`),
 your account needs subordinate UID and GID ranges configured in
 `/etc/subuid` and `/etc/subgid`. This is a one-time host setup that enables
-unprivileged multi-user chroots. Native mode, rooted `--single`, and the
-standalone `single` action do not require subordinate IDs.
+unprivileged multi-user chroots. Native mode and rooted `--single` do not
+require subordinate IDs.
 
 To configure rich root support, add entries for your username (replace `drobbins`):
 
@@ -362,10 +329,10 @@ appropriate path for the environment in front of you.
 unroot is designed for root filesystems and commands that you trust. It is not
 a general-purpose sandbox for hostile code.
 
-Rich roots and single mode use a user namespace, so namespace root capabilities
-do not become host root privileges. Native mode deliberately uses host root.
-Every mode creates private mount and PID namespaces, keeping mount changes local
-to the process tree.
+Rich roots and single-ID rootfs entry use a user namespace, so namespace root
+capabilities do not become host root privileges. Native mode deliberately uses
+host root. Every mode creates private mount and PID namespaces, keeping mount
+changes local to the process tree.
 
 unroot shares the host network, IPC namespace, hostname, cgroup hierarchy,
 kernel, and hardware interfaces. It does not install syscall filters, impose
@@ -381,7 +348,7 @@ selected devices remain backed by host resources.
 ## Initial Release Scope
 
 The first public release focuses on dependable rootfs entry and transport:
-durable rich and native ownership, explicit single-mode execution, native and
+durable rich and native ownership, explicit single-ID rootfs entry, native and
 foreign-architecture commands, full-metadata tar import and export, minimal
 automatic mounts, environment and working-directory configuration, and exact
 child I/O and exit-status propagation.
@@ -401,18 +368,19 @@ Where the target distribution provides one, packages recommend its static QEMU
 user-mode provider. Normal `apt` and Fedora `dnf` installations therefore
 include cross-architecture support automatically. EL9 does not package a QEMU
 user-mode provider in its standard repositories, so users must supply one for
-foreign execution. Users who only need `single` or same-architecture operation
-may deliberately disable recommended or weak dependencies. Unroot does not
-require a distribution-installed host-global `binfmt_misc` policy.
+foreign execution. Users who only need single-ID rootfs entry or
+same-architecture operation may deliberately disable recommended or weak
+dependencies. Unroot does not require a distribution-installed host-global
+`binfmt_misc` policy.
 
-The standalone binary remains useful for `single` and same-architecture native
-operation. Build from source or install a native package for the complete rich
-rootfs feature set.
+The standalone binary remains useful for single-ID and same-architecture native
+rootfs entry. Build from source or install a native package for the complete
+rich rootfs feature set.
 
 ## Requirements
 
 - Linux with the namespace operations required by the selected mode
-- Unprivileged user namespaces for rich roots and `single`
+- Unprivileged user namespaces for rich roots and `enter --single`
 - `unroot-util`, `/usr/bin/newuidmap`, `/usr/bin/newgidmap`, and suitable host
   subordinate-ID allocations for rich roots (configured in `/etc/subuid` and
   `/etc/subgid` by your distribution)

@@ -94,7 +94,6 @@ std::unique_ptr<EmuPlan> EnterAction::setupEmulation(
     util::hostLogStep("exec:first", true, command);
 
     emulation::Settings settings;
-    settings.hostVisible = config.hostVisible;
     settings.native = idmap.mode == util::IdMapMode::Native;
     settings.root = config.root;
     settings.executable = config.targetExecutable;

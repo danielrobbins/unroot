@@ -28,7 +28,7 @@ Suggests:       zstd
 Unroot enters, runs, creates, and transports Linux root filesystems using
 namespaces, durable subordinate-ID mappings, and optional QEMU user-mode
 emulation. It supports unprivileged rich roots, native host-owned roots,
-single-identity namespace execution, and faithful rootfs archives without a
+single-owner rootfs entry, and faithful rootfs archives without a
 resident container daemon.
 
 %prep

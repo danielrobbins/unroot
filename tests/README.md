@@ -39,7 +39,7 @@ and initial `binfmt_misc` state that produced it.
 
 GitHub CI sets Ubuntu's AppArmor user-namespace restriction explicitly. The
 restricted cells run `test_namespace_policy.py`; enabled cells run the complete
-single, rich-ID, native-ownership, and cross-architecture suites.
+single-ID rootfs, rich-ID, native-ownership, and cross-architecture suites.
 
 Ubuntu builds the helper with libsubid so the rich-ID suite exercises
 provider-backed selection, persisted-map reuse, and exact-allocation

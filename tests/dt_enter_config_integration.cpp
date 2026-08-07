@@ -70,18 +70,6 @@ TEST_CASE("EnterConfig integration: implicit trailing without -- is collected wh
     CHECK(cfg.shell[1] == "hi");
 }
 
-TEST_CASE("SingleConfig accepts a command without ROOT") {
-    SingleConfig cfg;
-    ToBeParsedArgs tpa; tpa.args = {"--", "/bin/echo"};
-    cfg.parse(tpa);
-    cfg.validate();
-    CHECK(cfg.singleId);
-    CHECK(cfg.hostVisible);
-    CHECK(cfg.root.empty());
-    REQUIRE(cfg.shell.size() == 1);
-    CHECK(cfg.shell[0] == "/bin/echo");
-}
-
 TEST_CASE("EnterConfig accepts read-only same-path and explicit mappings") {
     EnterConfig cfg;
     ToBeParsedArgs args;
@@ -137,20 +125,6 @@ TEST_CASE("EnterConfig rejects contradictory emulation controls") {
                 "--", "/bin/sh"};
     cfg.parse(tpa);
     REQUIRE_THROWS_AS(cfg.validate(), AppException);
-}
-
-TEST_CASE("SingleConfig keeps rootfs controls out of single mode") {
-    for (const auto& option : std::vector<std::vector<std::string>>{
-             {"--emulation", "auto"}, {"--emulation", "never"},
-             {"--qemu", "/tmp/qemu"},
-             {"--qemu-cpu", "qemu64"}}) {
-        SingleConfig cfg;
-        ToBeParsedArgs tpa;
-        tpa.args = {};
-        tpa.args.insert(tpa.args.end(), option.begin(), option.end());
-        tpa.args.insert(tpa.args.end(), {"--", "/bin/true"});
-        REQUIRE_THROWS_AS(cfg.parse(tpa), std::invalid_argument);
-    }
 }
 
 TEST_CASE("EnterConfig probes the requested absolute command before /bin/sh") {

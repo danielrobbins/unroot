@@ -118,7 +118,9 @@ def test_public_docs_match_the_initial_release_surface():
     notes = (root / "RELEASE_NOTES.md").read_text(encoding="utf-8")
 
     assert "unroot enter ROOT" in manual
-    assert "unroot single" in manual
+    assert "unroot enter --single ROOT" in manual
+    assert "unroot single" not in manual
+    assert "unroot single" not in readme
     assert "unroot unpack --native" in manual
     assert "not fallbacks for one another" in manual
     for obsolete in ("--rootless", "--idmap"):

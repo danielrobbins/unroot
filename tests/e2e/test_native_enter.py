@@ -45,6 +45,7 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     assert "--emulation" in enter_help.stdout
     assert "--qemu" in enter_help.stdout
     assert "--qemu-cpu" in enter_help.stdout
+    assert "--single" in enter_help.stdout
     assert "--subarch" not in enter_help.stdout
     assert "experimental" not in enter_help.stdout
 
@@ -53,13 +54,6 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     unpack_help = unroot.run("unpack", "--help").assert_ok()
     assert "unpack ARCHIVE ROOT" in unpack_help.stdout
     assert "--native" in unpack_help.stdout
-
-    single_help = unroot.run("single", "--help").assert_ok()
-    assert "--cwd" in single_help.stdout
-    assert "--env" in single_help.stdout
-    assert "--no-default-env" in single_help.stdout
-    assert "--native" not in single_help.stdout
-
 
 @pytest.mark.parametrize("arguments", [("unknown-action",), ("unknown-action", "--help")])
 def test_unknown_action_is_usage_error(
@@ -81,16 +75,11 @@ def test_deferred_filesystem_actions_are_not_public(
     assert f"unknown action: {action}" in result.stderr
 
 
-def test_single_user_mapping(unroot: UnrootRunner) -> None:
-    result = unroot.run("single", "--", "/usr/bin/id", "-u").assert_ok()
-    assert result.stdout.strip() == "0"
+def test_standalone_single_action_is_not_public(unroot: UnrootRunner) -> None:
+    result = unroot.run("single", "--", "/bin/true")
 
-
-def test_single_user_mapping_denies_setgroups(unroot: UnrootRunner) -> None:
-    result = unroot.run(
-        "single", "--", "/bin/cat", "/proc/self/setgroups"
-    ).assert_ok()
-    assert result.stdout.strip() == "deny"
+    assert result.returncode == 2, result.diagnostic()
+    assert "unknown action: single" in result.stderr
 
 
 def test_enter_single_changes_root_with_one_id_mapping(
@@ -115,10 +104,11 @@ def test_enter_single_changes_root_with_one_id_mapping(
         "/bin/busybox",
         "sh",
         "-c",
-        'printf "%s:" "$(id -u)"; cat /inside-root',
+        'printf "%s:" "$(id -u)"; cat /inside-root; '
+        'printf ":%s" "$(cat /proc/self/setgroups)"',
     ).assert_ok()
 
-    assert result.stdout == "0:rooted-single-ok"
+    assert result.stdout == "0:rooted-single-ok:deny"
 
 
 def test_enter_single_rejects_managed_ownership(
@@ -135,104 +125,25 @@ def test_enter_single_rejects_managed_ownership(
     )
 
 
-def test_single_user_mapping_does_not_require_host_helper(
+def test_enter_single_does_not_require_host_helper(
     unroot: UnrootRunner, tmp_path: Path
 ) -> None:
+    busybox = find_static_busybox()
+    if busybox is None:
+        pytest.skip("a static BusyBox is required for rooted single-ID entry")
+    root = create_rootfs(tmp_path / "single-root", busybox)
     standalone = tmp_path / "standalone" / "unroot"
     standalone.parent.mkdir()
     shutil.copy2(unroot.binary, standalone)
     isolated = UnrootRunner(standalone, unroot.repo, unroot.sudo_guard)
 
     result = isolated.run(
-        "single", "--", "/usr/bin/id", "-u"
+        "enter", "--single", str(root), "--", "/bin/busybox", "id", "-u"
     ).assert_ok()
 
     assert result.stdout.strip() == "0"
 
 
-def test_single_working_directory(unroot: UnrootRunner, tmp_path: Path) -> None:
-    result = unroot.run(
-        "single", "--cwd", str(tmp_path), "--", "/bin/pwd"
-    ).assert_ok()
-    assert result.stdout.strip() == str(tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("option", "value"),
-    [
-        ("--map", "/tmp"),
-        ("--map-ro", "/tmp:/tmp"),
-        ("--emulation", "auto"),
-        ("--emulation", "never"),
-        ("--qemu", "/tmp/qemu"),
-        ("--qemu-cpu", "qemu64"),
-    ],
-)
-def test_single_rejects_rootfs_only_options(
-    unroot: UnrootRunner, option: str, value: str
-) -> None:
-    result = unroot.run("single", option, value, "--", "/bin/true")
-
-    assert result.returncode != 0, result.diagnostic()
-    assert f"Unknown option: {option}" in result.stderr
-
-
-def test_single_setup_does_not_mutate_visible_filesystems(
-    unroot: UnrootRunner,
-    tmp_path: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
-) -> None:
-    unshare = shutil.which("unshare")
-    mount = shutil.which("mount")
-    require_capability(
-        unshare is not None and mount is not None,
-        "unshare and mount are required for the single-mode host-mutation test",
-        "single_host_guard",
-    )
-    probe = run_command(
-        [unshare, "--user", "--map-root-user", "--mount", "true"]
-    )
-    require_capability(
-        probe.returncode == 0,
-        "nested user/mount namespaces are unavailable\n" + probe.diagnostic(),
-        "single_host_guard",
-    )
-
-    fake_dev = tmp_path / "dev"
-    fake_etc = tmp_path / "etc"
-    (fake_dev / "pts").mkdir(parents=True)
-    fake_etc.mkdir()
-    (fake_dev / "ptmx").write_text("host-sentinel\n", encoding="utf-8")
-    script = r"""
-set -eu
-mount --make-rprivate /
-mount --bind "$1" /dev
-mount --bind "$2" /etc
-UNROOT_SUDO="$4" "$3" single -- /bin/true
-test -f "$1/ptmx"
-test ! -L "$1/ptmx"
-IFS= read -r value < "$1/ptmx"
-test "$value" = host-sentinel
-test ! -e "$2/mtab"
-"""
-    result = run_command(
-        [
-            unshare,
-            "--user",
-            "--map-root-user",
-            "--mount",
-            "sh",
-            "-c",
-            script,
-            "sh",
-            str(fake_dev),
-            str(fake_etc),
-            str(unroot.binary),
-            str(unroot.sudo_guard),
-        ]
-    )
-
-    assert result.returncode == 0, result.diagnostic()
 
 
 def test_managed_rooted_execution(unroot: UnrootRunner, managed_rootfs: Path) -> None:

@@ -85,11 +85,6 @@ void EnterConfig::configureExecutionOptions() {
         .add_flag_meta({"--help", "-h"}, "Display help for this action", [](){});
 }
 
-void SingleConfig::configure_parser() {
-    ActionConfig::configure_parser();
-    configureExecutionOptions();
-}
-
 void EnterConfig::postParse(const OptionParser::ParseResult& result) {
     // Handle trailing arguments (command to execute after --)
     for (const auto& c : result.trailing_args) {
@@ -166,13 +161,6 @@ void EnterConfig::validate() const {
 }
 
 void EnterConfig::validateRootfs() const {
-    if (hostVisible) {
-        if (!root.empty())
-            throw AppException(util::make_error(
-                util::LibErr::Invalid, 0, "single does not accept a rootfs"),
-                "usage");
-        return;
-    }
     if (root.empty()) {
         throw AppException(util::make_error(util::LibErr::Invalid, 0, 
             "enter requires ROOT"), "usage");
@@ -214,45 +202,40 @@ void EnterConfig::validateNamespace() const {
 
 void EnterConfig::analyzeArchitecture() {
     hostArch = detectHostArch();
-    
-    if (!root.empty()) {
-        targetExecutable = shell.empty() ? "/bin/sh" : shell[0];
-        if (!targetExecutable.empty() && targetExecutable[0] != '/') {
-            std::string path;
-            if (targetExecutable.find('/') == std::string::npos) {
-                auto item = std::find_if(
-                    envVars.begin(), envVars.end(),
-                    [](const auto& value) { return value.first == "PATH"; });
-                if (item == envVars.end() || item->second.empty()) {
-                    throw AppException(
-                        util::make_error(
-                            util::LibErr::Invalid, 0,
-                            "bare commands require PATH via --env or --persist-env"),
-                        "usage");
-                }
-                path = item->second;
-            }
-            targetExecutable = util::resolveExecInRoot(
-                root, cwdInRoot, targetExecutable, path);
-        }
-        if (!targetExecutable.empty()) {
-            targetExecutable = resolveExecutableImage(root, targetExecutable);
-            ElfInfo target = readElfInfoAtRoot(root, targetExecutable);
-            if (target.valid && target.archName.empty()) {
+
+    targetExecutable = shell.empty() ? "/bin/sh" : shell[0];
+    if (!targetExecutable.empty() && targetExecutable[0] != '/') {
+        std::string path;
+        if (targetExecutable.find('/') == std::string::npos) {
+            auto item = std::find_if(
+                envVars.begin(), envVars.end(),
+                [](const auto& value) { return value.first == "PATH"; });
+            if (item == envVars.end() || item->second.empty()) {
                 throw AppException(
                     util::make_error(
                         util::LibErr::Invalid, 0,
-                        "unsupported ELF target: machine=" +
-                            std::to_string(target.e_machine) + ", " +
-                            elfClassToString(target.ei_class) + ", " +
-                            elfDataToString(target.ei_data)),
-                    "enter");
+                        "bare commands require PATH via --env or --persist-env"),
+                    "usage");
             }
-            targetArch = target.archName;
+            path = item->second;
         }
-    } else {
-        targetArch = hostArch;
-        targetExecutable.clear();
+        targetExecutable = util::resolveExecInRoot(
+            root, cwdInRoot, targetExecutable, path);
+    }
+    if (!targetExecutable.empty()) {
+        targetExecutable = resolveExecutableImage(root, targetExecutable);
+        ElfInfo target = readElfInfoAtRoot(root, targetExecutable);
+        if (target.valid && target.archName.empty()) {
+            throw AppException(
+                util::make_error(
+                    util::LibErr::Invalid, 0,
+                    "unsupported ELF target: machine=" +
+                        std::to_string(target.e_machine) + ", " +
+                        elfClassToString(target.ei_class) + ", " +
+                        elfDataToString(target.ei_data)),
+                "enter");
+        }
+        targetArch = target.archName;
     }
     
     isCrossArch = (!targetArch.empty() && !hostArch.empty() && targetArch != hostArch);
@@ -283,10 +266,6 @@ int EnterConfig::handle(const ToBeParsedArgs& args) {
     return ActionConfig::run<EnterConfig>(args);
 }
 
-int SingleConfig::handle(const ToBeParsedArgs& args) {
-    return ActionConfig::run<SingleConfig>(args);
-}
-
 } // namespace actions
 
 namespace {
@@ -303,16 +282,4 @@ namespace {
         return true;
     }();
 
-    static bool single_registered = []() {
-        actions::ActionRegistry::register_action(
-            "single",
-            actions::SingleConfig::handle,
-            "Run with a single-identity user namespace",
-            "Keeps the host filesystem visible while mapping the invoking "
-            "user to namespace root.",
-            "[OPTIONS] [-- COMMAND [ARGUMENTS...]]",
-            []() { return std::make_unique<actions::SingleConfig>(); }
-        );
-        return true;
-    }();
 }

@@ -19,8 +19,8 @@ unroot keeps ownership choices explicit rather than guessing:
   ranges. Perfect for build and packaging work without host root.
 - **Native roots** — Host-owned or mounted filesystems with native ownership.
   Requires `sudo` for conventional chroot behavior.
-- **Single mode** — Run commands as namespace root with the host filesystem
-  visible. Trusted builds needing capabilities without subordinate IDs.
+- **Single-ID roots** — Enter unmanaged single-owner rootfs trees without
+  subordinate IDs by explicitly using `unroot enter --single ROOT`.
 
 unroot never silently downgrades rich ownership to single-ID or escalates an
 unprivileged request into host-root execution.
@@ -61,7 +61,7 @@ unroot is designed for **trusted** build, packaging, and rootfs-maintenance
 workloads. It is **not** a hostile-code sandbox:
 
 - ✓ Private mount and PID namespaces
-- ✓ User namespace isolation (rich roots and single mode)
+- ✓ User namespace isolation (rich roots and single-ID rootfs entry)
 - ✓ Namespace root ≠ host root
 - ✗ Shared network, IPC, hostname, cgroups, and kernel
 - ✗ No syscall filters, resource limits, or MAC policies
@@ -110,8 +110,8 @@ unroot enter ~/rootfs
 unroot unpack raspi4-rootfs.tar.xz ~/roots/raspi4
 unroot enter ~/roots/raspi4
 
-# Build as namespace root without sudo
-unroot single --persist-env PATH -- make -j32
+# Enter a single-owner rootfs without subordinate IDs
+unroot enter --single ~/roots/appliance -- /bin/sh
 ```
 
 For complete usage examples, see [README.md](README.md).

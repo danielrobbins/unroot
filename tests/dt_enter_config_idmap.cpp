@@ -14,7 +14,6 @@ TEST_CASE("enter consumes a rootfs ownership mode from metadata") {
 
     CHECK(config.root == "/tmp/rootfs");
     CHECK_FALSE(config.singleId);
-    CHECK_FALSE(config.hostVisible);
     CHECK_FALSE(config.native);
 }
 
@@ -26,7 +25,6 @@ TEST_CASE("enter accepts explicit single-ID ownership") {
     config.parse(args);
 
     CHECK(config.singleId);
-    CHECK_FALSE(config.hostVisible);
     CHECK_FALSE(config.native);
 }
 
@@ -58,22 +56,4 @@ TEST_CASE("enter does not expose retired rootless or ID-map options") {
         EnterConfig config;
         REQUIRE_THROWS_AS(config.parse(args), std::invalid_argument);
     }
-}
-
-TEST_CASE("single has a distinct no-rootfs command surface") {
-    ToBeParsedArgs args;
-    args.action_name = "single";
-    args.args = {"--cwd", "/tmp", "--env", "VALUE=ok", "--", "/bin/true"};
-    SingleConfig config;
-    config.parse(args);
-    config.validate();
-
-    CHECK(config.singleId);
-    CHECK(config.hostVisible);
-    CHECK(config.root.empty());
-    CHECK(config.cwdInRoot == "/tmp");
-    REQUIRE(config.envVars.size() == 2);
-    CHECK(config.envVars[0].first == "VALUE");
-    CHECK(config.envVars[0].second == "ok");
-    CHECK(config.envVars[1].first == "PATH");
 }

@@ -90,13 +90,6 @@ EmuPlan Manager::prepare() {
                              "--emulation=never"),
         "enter");
   }
-  if (settings_.hostVisible) {
-    throw AppException(
-        util::make_error(util::LibErr::Invalid, 0,
-                         "cross-architecture execution requires a rootfs"),
-        "usage");
-  }
-
   std::string emulator = settings_.qemu.empty()
                              ? qemuUserEmulatorForArch(settings_.targetArch)
                              : settings_.qemu;

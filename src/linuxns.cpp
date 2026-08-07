@@ -105,8 +105,8 @@ public:
   enabled_["devbind"] = false;
   // Do not mount a tmpfs over /tmp by default (preserve host /tmp semantics)
   enabled_["tmp"] = false;
-  // In single mode, avoid over-mounting visible host paths by default.
-  // Users can still opt in via UNROOT_FEATURES=+run,+shm.
+  // Archive operations retain the host filesystem, so avoid over-mounting
+  // visible host paths by default.
   if (hostVisible) {
     enabled_["run"] = false;
     enabled_["shm"] = false;

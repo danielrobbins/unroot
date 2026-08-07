@@ -9,8 +9,8 @@ branch.
 ## Supported Core
 
 - `unroot enter ROOT [OPTIONS] -- COMMAND [ARGUMENTS...]`
+- `unroot enter --single ROOT [OPTIONS] -- COMMAND [ARGUMENTS...]`
 - `sudo unroot enter --native ROOT [OPTIONS] -- COMMAND [ARGUMENTS...]`
-- `unroot single [OPTIONS] -- COMMAND [ARGUMENTS...]`
 - `unroot unpack ARCHIVE ROOT`
 - `sudo unroot unpack --native ARCHIVE ROOT`
 - `unroot pack ROOT ARCHIVE [OPTIONS]`
@@ -18,10 +18,8 @@ branch.
   persisted per rootfs and revalidated before every entry;
 - native host ownership for privileged chroots, existing root filesystems, and
   mounted roots that must retain their host-visible IDs;
-- a separate single-identity action for namespace capabilities without a
-  changed filesystem root;
 - private mount and PID namespaces in every mode, plus a private user namespace
-  for rich roots and `single`;
+  for rich roots and single-ID rootfs entry;
 - automatic QEMU execution for supported foreign architectures, with explicit
   controls to disable emulation or select a static emulator and CPU model;
 - private `binfmt_misc` registration for rich roots and guarded host registration

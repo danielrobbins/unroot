@@ -13,7 +13,6 @@ enum class Policy { Auto, Never };
 const char* policyName(Policy policy);
 
 struct Settings {
-  bool hostVisible = false;
   bool native = false;
   std::string root;
   std::string executable;

@@ -27,7 +27,9 @@ def test_restricted_user_namespace_reports_classified_failure(
     if os.environ.get("UNROOT_E2E_USERNS_POLICY") != "restricted":
         pytest.skip("requires an explicitly restricted user-namespace policy")
 
-    result = unroot.run("single", "--", "/usr/bin/id", "-u")
+    result = unroot.run(
+        "enter", "--single", "/", "--", "/usr/bin/id", "-u"
+    )
 
     assert result.returncode not in {-signal.SIGPIPE, 128 + signal.SIGPIPE}, (
         result.diagnostic()

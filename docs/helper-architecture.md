@@ -9,9 +9,9 @@ integration:
   lookups whose correct behavior may depend on libc, NSS, or another host
   provider.
 
-`unroot single` and same-architecture native execution use only the static
-engine. Managed rich roots use `unroot-util` for subordinate-ID selection and
-exact recorded-allocation validation.
+Single-ID rootfs entry and same-architecture native execution use only the
+static engine. Managed rich roots use `unroot-util` for subordinate-ID
+selection and exact recorded-allocation validation.
 
 ## Why The Split Exists
 
@@ -72,9 +72,9 @@ binary directory. Distribution packages should install both and provide
 libsubid's development interface at build time when the target distribution
 supports non-file subordinate-ID providers.
 
-The standalone static release binary remains sufficient for `single` and
-same-architecture native execution. Managed rich roots require a host-built or
-distribution-built `unroot-util`, because distributing one generic dynamically
-linked helper would defeat the purpose of integrating with the target host
-runtime. The helper also builds against musl; without a compatible libsubid
-interface it uses the local file backend.
+The standalone static release binary remains sufficient for `enter --single`
+and same-architecture native execution. Managed rich roots require a host-built
+or distribution-built `unroot-util`, because distributing one generic
+dynamically linked helper would defeat the purpose of integrating with the
+target host runtime. The helper also builds against musl; without a compatible
+libsubid interface it uses the local file backend.

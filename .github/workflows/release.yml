@@ -91,7 +91,7 @@ jobs:
         env:
           UNROOT_E2E_REPORT: e2e-native-${{ matrix.architecture }}.json
           UNROOT_E2E_STRICT: "1"
-          UNROOT_E2E_REQUIRE: private_binfmt,rich_idmap,native_mode,single_host_guard
+          UNROOT_E2E_REQUIRE: private_binfmt,rich_idmap,native_mode
         run: make e2e
       - name: Run cross-architecture qualification
         env:

@@ -9,7 +9,7 @@ QEMU user-mode emulation is a recommended dependency where the target's
 standard repositories provide it. Normal `apt` and Fedora `dnf` installations
 therefore include cross-architecture support automatically, while minimal
 installations can omit weak or recommended dependencies when only
-same-architecture or `single` operation is needed. EL9 does not package QEMU
+same-architecture or single-ID rootfs operation is needed. EL9 does not package QEMU
 user-mode emulation in its standard repositories, so its Unroot package leaves
 the optional emulator installation to the user. Unroot does not require a
 host-global `binfmt_misc` policy package.

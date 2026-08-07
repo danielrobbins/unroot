@@ -117,7 +117,7 @@ jobs:
         env:
           UNROOT_E2E_REPORT: e2e-native-${{ matrix.arch }}.json
           UNROOT_E2E_STRICT: "1"
-          UNROOT_E2E_REQUIRE: private_binfmt,rich_idmap,native_mode,single_host_guard,rootfs_journey
+          UNROOT_E2E_REQUIRE: private_binfmt,rich_idmap,native_mode,rootfs_journey
         run: make e2e
       - name: Cross-architecture execution
         if: matrix.userns == 'enabled'
@@ -188,7 +188,7 @@ jobs:
             --security-opt seccomp=unconfined \
             --security-opt systempaths=unconfined \
             --env UNROOT_E2E_STRICT=1 \
-            --env UNROOT_E2E_REQUIRE=private_binfmt,single_host_guard \
+            --env UNROOT_E2E_REQUIRE=private_binfmt \
             --env UNROOT_E2E_REPORT=/reports/nested-namespaces.json \
             --volume "${PWD}/e2e-docker:/reports" \
             unroot-e2e \

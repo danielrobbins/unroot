@@ -23,12 +23,10 @@ const char* getVersion() {
 void showUsage() {
   std::cout << "Usage:\n";
   std::cout << "  unroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\n";
-  std::cout << "  unroot single [OPTIONS] [-- COMMAND [ARGUMENTS...]]\n";
   std::cout << "  unroot unpack ARCHIVE ROOT [OPTIONS]\n";
   std::cout << "  unroot pack ROOT ARCHIVE [OPTIONS]\n\n";
   std::cout << "Actions:\n";
   std::cout << "  enter       Enter an initialized or explicitly native root filesystem.\n";
-  std::cout << "  single      Run with one user identity in private namespaces.\n";
   std::cout << "  pack        Capture a mapped root filesystem as a tar archive.\n";
   std::cout << "  unpack      Create a mapped root filesystem from a tar archive.\n";
   
