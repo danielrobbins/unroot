@@ -1,3 +1,64 @@
+# Unroot 1.0.1
+
+**Maintenance Release** — August 2026
+
+Unroot 1.0.1 incorporates the first round of real-world feedback after the
+initial release. It restores conventional chroot behavior at several important
+edges, makes the ownership model easier to use, and strengthens diagnostics and
+archive safety without expanding the project's scope.
+
+## Rootfs Compatibility
+
+- The minimal `/dev` now provides `/dev/full`, the conventional fd and standard
+  stream links, and a correctly mapped PTY environment. Shell process
+  substitution and interactive tools work without exposing the host's complete
+  `/dev` tree. ([#2](https://github.com/danielrobbins/unroot/issues/2))
+- Target processes receive a deterministic rootfs-oriented `PATH` by default.
+  It remains explicitly configurable, and `--no-default-env` provides a truly
+  empty starting environment when required. ([#3](https://github.com/danielrobbins/unroot/issues/3))
+- Rich ID mappings retain supplementary-group support because their GID maps
+  are authorized through `newgidmap`; the required `setgroups` denial remains
+  limited to single-ID mappings. This allows Portage privilege dropping to work
+  normally. ([#6](https://github.com/danielrobbins/unroot/issues/6))
+- Namespace setup failures after ID mapping now retain their setup stage and
+  original system error, producing useful AppArmor, seccomp, SELinux, and
+  outer-container diagnostics. ([#7](https://github.com/danielrobbins/unroot/issues/7))
+
+## Ownership And CLI
+
+- `unroot enter --single ROOT` explicitly supports unmanaged, single-owner
+  rootfs trees without requiring subordinate UID or GID allocations.
+  ([#4](https://github.com/danielrobbins/unroot/issues/4))
+- `--map-ro SOURCE` is now shorthand for `--map-ro SOURCE:SOURCE`.
+  ([#5](https://github.com/danielrobbins/unroot/issues/5))
+- The confusing standalone `unroot single` action has been removed. Single-ID
+  ownership now has one focused purpose: entering an explicitly selected
+  single-owner rootfs. ([#12](https://github.com/danielrobbins/unroot/issues/12),
+  [#14](https://github.com/danielrobbins/unroot/issues/14))
+- Native mode is now presented directly as Unroot's conventional privileged
+  chroot workflow for host-owned and mounted filesystems.
+  ([#11](https://github.com/danielrobbins/unroot/issues/11))
+
+## Archive Safety And Ownership Conversion
+
+- `pack` and `unpack` preflight GNU tar's ACL, extended-attribute, and SELinux
+  support. Unroot refuses silent metadata loss by default; `--force` provides
+  an explicit override when reduced fidelity is acceptable.
+  ([#8](https://github.com/danielrobbins/unroot/issues/8))
+- The documentation now explains how `pack` followed by `unpack --native`
+  converts a rich rootfs into a separate native tree, and how the reverse flow
+  creates a rich managed copy without unsafe manual ownership rewriting.
+  ([#10](https://github.com/danielrobbins/unroot/issues/10))
+
+## Known QEMU Compatibility Boundary
+
+Foreign Portage builds may need `FEATURES="-pid-sandbox"` because QEMU
+linux-user cannot create a host thread after Portage enters another PID
+namespace. Native-architecture builds are unaffected. Unroot documents this
+upstream limitation but does not silently alter distribution policy.
+([#13](https://github.com/danielrobbins/unroot/issues/13),
+[QEMU #172](https://gitlab.com/qemu-project/qemu/-/issues/172))
+
 # Unroot 1.0.0
 
 **Initial Release** — August 2026

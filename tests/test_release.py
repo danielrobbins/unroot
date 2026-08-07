@@ -123,6 +123,8 @@ def test_public_docs_match_the_initial_release_surface():
     assert "unroot single" not in readme
     assert "unroot unpack --native" in manual
     assert "not fallbacks for one another" in manual
+    for document in (manual, readme, notes):
+        assert "pid-sandbox" in document
     for obsolete in ("--rootless", "--idmap"):
         assert obsolete not in manual
         assert obsolete not in readme

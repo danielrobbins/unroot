@@ -162,6 +162,8 @@ An explicit `--qemu` used with native mode must resolve to a trusted absolute pa
 
 Use `--emulation never` when foreign execution must fail rather than start QEMU. QEMU overrides apply only when the target architecture differs from the host. Unroot includes ELF class and byte order in target identity and rejects recognized but unsupported combinations rather than choosing an approximate emulator.
 
+During a foreign-architecture build, Portage's `pid-sandbox` may create another PID namespace and trigger a QEMU linux-user failure: `qemu: qemu_thread_create: Invalid argument`. Foreign Gentoo and Funtoo builds should disable only this Portage feature with `FEATURES="-pid-sandbox"` in `/etc/portage/make.conf`. Native-architecture builds do not need this workaround. This is an upstream QEMU limitation tracked at https://gitlab.com/qemu-project/qemu/-/issues/172 and https://github.com/danielrobbins/unroot/issues/13; Unroot does not silently rewrite distribution build policy.
+
 Private `binfmt_misc` instances require Linux 6.7 or newer and permission from the surrounding runtime. Native foreign execution works on older kernels that support ordinary host `binfmt_misc`, but requires host root privileges to mount or register it when no compatible handler already exists.
 
 == @topic security-model: SECURITY MODEL [priority=50]
