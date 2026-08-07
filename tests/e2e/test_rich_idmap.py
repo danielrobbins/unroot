@@ -84,6 +84,69 @@ def _require_mapping(
     return result.assert_ok()
 
 
+def _compile_setgroups_probe(
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> Path:
+    compiler = shutil.which(os.environ.get("CC", "cc"))
+    require_capability(
+        compiler is not None,
+        "a C compiler is required for setgroups qualification",
+        "rich_idmap",
+    )
+    assert compiler is not None
+    source = Path(__file__).with_name("fixtures") / "setgroups_probe.c"
+    probe = tmp_path / "setgroups-probe"
+    built = run_command(
+        [
+            compiler,
+            "-static",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-o",
+            str(probe),
+            str(source),
+        ]
+    )
+    require_capability(
+        built.returncode == 0,
+        "a static C toolchain is required for setgroups qualification:\n"
+        + built.diagnostic(),
+        "rich_idmap",
+    )
+    return probe
+
+
+def test_rich_mapping_allows_supplementary_group_changes(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    probe = _compile_setgroups_probe(tmp_path, require_capability)
+    shutil.copy2(probe, managed_rootfs / "bin" / probe.name)
+
+    setting = _require_mapping(
+        unroot.run(
+            "enter",
+            str(managed_rootfs),
+            "--",
+            "/bin/busybox",
+            "cat",
+            "/proc/self/setgroups",
+        ),
+        require_capability,
+    )
+    assert setting.stdout.strip() == "allow"
+
+    changed = unroot.run(
+        "enter", str(managed_rootfs), "--", "/bin/setgroups-probe", "1"
+    ).assert_ok()
+    assert changed.stdout.strip() == "group:1"
+
+
 def test_rich_mapping_translates_namespace_ownership(
     unroot: UnrootRunner,
     managed_rootfs: Path,

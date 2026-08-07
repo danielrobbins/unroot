@@ -619,14 +619,6 @@ bool setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* emu,
 // The parent is the only process which writes ID maps; rich mappings require
 // the privileged newuidmap/newgidmap helpers and cannot be self-mapped.
 static UniqueFd awaitIdMap(int c2p_write, int p2c_read) {
-  if (int sfd = ::open("/proc/self/setgroups", O_WRONLY | O_CLOEXEC); sfd >= 0) {
-    UniqueFd ufd(sfd);
-    if (!util::write_all(ufd.get(), "deny", 4))
-      reportSetupFailure(c2p_write, 112);
-  } else if (errno != ENOENT) {
-    reportSetupFailure(c2p_write, 112);
-  }
-
   UniqueFd cw(c2p_write);
   UniqueFd pr(p2c_read);
   const char ready = 'R';
@@ -689,6 +681,15 @@ static NsResult mapSingleId(pid_t childPid, const util::IdMapPlan& plan) {
     return fd && util::write_all(fd.get(), map, (size_t)length);
   };
   if (!writeMap("uid", plan.uids.front())) return {2, "failed to write uid_map"};
+  // An unprivileged gid_map write requires permanently disabling setgroups.
+  char path[64];
+  std::snprintf(path, sizeof(path), "/proc/%d/setgroups", (int)childPid);
+  UniqueFd setgroups(::open(path, O_WRONLY | O_CLOEXEC));
+  if ((!setgroups && errno != ENOENT) ||
+      (setgroups && !util::write_all(setgroups.get(), "deny", 4))) {
+    int error = errno;
+    return {29, namespacePolicyDiagnostic("setgroups deny failed", error)};
+  }
   if (!writeMap("gid", plan.gids.front())) return {2, "failed to write gid_map"};
   return {0, {}};
 }
@@ -713,6 +714,7 @@ static NsResult mapRichId(pid_t childPid, const util::IdMapPlan& plan) {
   if (runMapHelper(uidHelper, "newuidmap", childPid, plan.uids) != 0) {
     return {24, "newuidmap failed"};
   }
+  // newgidmap supplies parent authority, so rich roots retain setgroups.
   if (runMapHelper(gidHelper, "newgidmap", childPid, plan.gids) != 0) {
     return {24, "newgidmap failed"};
   }
@@ -737,8 +739,6 @@ static NsResult decodeChildStatus(int status, int setupErrno = 0) {
     case 109: return {27, "target fork failed"};
     case 110: return {11, "procfs unavailable after mount failure"};
     case 111: return {28, "cwd change failed"};
-    case 112: return {29, namespacePolicyDiagnostic(
-        "setgroups deny failed", setupErrno)};
     case 113: return {10, namespacePolicyDiagnostic(
         "unshare failed for mount and PID namespaces", setupErrno)};
     default: return {-1, std::to_string(ec)};

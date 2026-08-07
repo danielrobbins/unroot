@@ -25,9 +25,11 @@ Builds `bin/unroot` and runs the pytest suite under `tests/e2e/` against real
 Linux namespaces. Python is only the test orchestrator: every behavior is
 exercised through the shipped Unroot executable. The suite verifies:
 
-- explicit single-mode ID mapping and host-filesystem mutation guards;
+- explicit single-mode ID mapping, required `setgroups` denial, and
+  host-filesystem mutation guards;
 - rich subordinate ID mapping, host ownership translation, durable metadata,
-  implicit map reuse, and refusal of stale or conflicting mappings;
+  live supplementary-group changes, implicit map reuse, and refusal of stale
+  or conflicting mappings;
 - managed rich entry and privileged native ownership and entry;
 - working-directory and environment propagation;
 - rooted `PATH` command lookup;

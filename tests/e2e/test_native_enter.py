@@ -86,6 +86,13 @@ def test_single_user_mapping(unroot: UnrootRunner) -> None:
     assert result.stdout.strip() == "0"
 
 
+def test_single_user_mapping_denies_setgroups(unroot: UnrootRunner) -> None:
+    result = unroot.run(
+        "single", "--", "/bin/cat", "/proc/self/setgroups"
+    ).assert_ok()
+    assert result.stdout.strip() == "deny"
+
+
 def test_enter_single_changes_root_with_one_id_mapping(
     unroot: UnrootRunner,
     tmp_path: Path,
