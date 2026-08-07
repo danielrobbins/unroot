@@ -252,6 +252,22 @@ def test_managed_rooted_execution(unroot: UnrootRunner, managed_rootfs: Path) ->
     assert result.stdout == "0:/tmp:ok"
 
 
+def test_managed_rootfs_can_allocate_pty(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        "test -L /dev/ptmx && exec 3<>/dev/ptmx",
+    )
+
+    result.assert_ok()
+
+
 def test_native_rootfs_has_usable_minimal_devices(
     unroot: UnrootRunner,
     tmp_path: Path,
@@ -277,7 +293,9 @@ test -L /dev/fd
 test -L /dev/stdin
 test -L /dev/stdout
 test -L /dev/stderr
+test -L /dev/ptmx
 exec 3</dev/null
+exec 4<>/dev/ptmx
 cat /dev/fd/3
 printf minimal-dev-ok >/dev/stdout
 """,

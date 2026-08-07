@@ -313,7 +313,7 @@ static bool setupPreChrootBinds(const util::Rootfs& root,
     if (!bindRootfsTarget(root, "/dev/zero", "/dev/zero", false, false,
                           false, "bind:/dev/zero", true, "minimal dev"))
       return false;
-    for (const char* device : {"full", "tty", "console", "random", "urandom", "ptmx"}) {
+    for (const char* device : {"full", "tty", "console", "random", "urandom"}) {
       std::string path = std::string("/dev/") + device;
       std::string step = std::string("bind:") + path;
       (void)bindRootfsTarget(root, path.c_str(), path, false, false, false,
@@ -375,7 +375,7 @@ static void setupPostChrootMounts(const NsOptions& opt, bool hostVisible) {
     }
   }
   // Ensure /dev/ptmx points to pts/ptmx
-  if (opt.mountDevpts && !hostVisible) {
+  if (opt.mountDevpts && !hostVisible && !opt.bindDev) {
     (void)::unlink("/dev/ptmx");
     bool ok = (::symlink("/dev/pts/ptmx", "/dev/ptmx") == 0);
     recordStep("link:/dev/ptmx", ok, false,
