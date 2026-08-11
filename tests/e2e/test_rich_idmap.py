@@ -291,3 +291,72 @@ def test_rich_archive_round_trip_preserves_logical_ownership(
     status = (restored / "owned").stat()
     assert status.st_uid == uid_start
     assert status.st_gid == gid_start + 1
+
+
+def test_custom_rich_mapping_preserves_large_logical_ids(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    count = 100000
+    uid_start, gid_start = _require_allocation(
+        unroot, count, require_capability
+    )
+    high_id = tmp_path / "high-id"
+    high_id.write_text("mapped\n", encoding="utf-8")
+    source_archive = tmp_path / "source.tar"
+    unroot.run("pack", str(managed_rootfs), str(source_archive)).assert_ok()
+    subprocess.run(
+        [
+            "tar", "--append", "--format=pax", "--numeric-owner",
+            "--owner=100000", "--group=100000", f"--file={source_archive}",
+            "--directory", str(tmp_path), high_id.name,
+        ],
+        check=True,
+    )
+
+    root = tmp_path / "custom-root"
+    _require_mapping(
+        unroot.run(
+            "unpack", "--id-count", str(count), str(source_archive), str(root)
+        ),
+        require_capability,
+    )
+    visible = _require_mapping(
+        unroot.run(
+            "enter",
+            str(root),
+            "--",
+            "/bin/busybox",
+            "stat",
+            "-c",
+            "%u:%g",
+            "/high-id",
+        ),
+        require_capability,
+    )
+    assert visible.stdout.strip() == "100000:100000"
+
+    status = (root / "high-id").stat()
+    assert status.st_uid == uid_start + count - 1
+    assert status.st_gid == gid_start + count - 1
+
+    metadata = json.loads(
+        (root / ".unroot" / "meta.json").read_text(encoding="utf-8")
+    )
+    assert metadata["idmap"]["uid_map"][1]["count"] == count
+    assert metadata["idmap"]["gid_map"][1]["count"] == count
+
+    reused = unroot.run(
+        "enter", str(root), "--", "/bin/busybox", "stat", "-c", "%u:%g",
+        "/high-id",
+    ).assert_ok()
+    assert reused.stdout.strip() == "100000:100000"
+
+    captured = tmp_path / "captured.tar"
+    unroot.run("pack", str(root), str(captured)).assert_ok()
+    with tarfile.open(captured) as packed:
+        member = packed.getmember("./high-id")
+        assert member.uid == 100000
+        assert member.gid == 100000

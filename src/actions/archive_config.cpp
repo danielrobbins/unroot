@@ -1,5 +1,6 @@
 #include "archive_config.hpp"
 
+#include <charconv>
 #include <filesystem>
 #include <unistd.h>
 
@@ -10,6 +11,26 @@
 #include "util/error_map.hpp"
 
 namespace actions {
+namespace {
+
+unsigned int parseIdCount(const std::string& value) {
+  unsigned int count = 0;
+  const char* begin = value.data();
+  const char* end = begin + value.size();
+  auto parsed = std::from_chars(begin, end, count);
+  if (value.empty() || parsed.ec != std::errc() || parsed.ptr != end ||
+      count == 0 || count > util::MaxRichIdCount) {
+    throw AppException(
+        util::make_error(
+            util::LibErr::Invalid, 0,
+            "--id-count must be an integer between 1 and " +
+                std::to_string(util::MaxRichIdCount)),
+        "usage");
+  }
+  return count;
+}
+
+}  // namespace
 
 void PackConfig::configure_parser() {
   ActionConfig::configure_parser();
@@ -52,6 +73,13 @@ void UnpackConfig::configure_parser() {
       .add_flag_meta(
           {"--force"}, "Continue when GNU tar cannot preserve all metadata",
           [this]() { force = true; })
+      .add_option_meta(
+          {"--id-count"}, "<count>",
+          "Map rootfs IDs 1 through count using subordinate IDs",
+          [this](const std::string& value) {
+            idCount = parseIdCount(value);
+            idCountSpecified = true;
+          })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
       .add_positional_meta(
           "ARCHIVE", "Source tar archive",
@@ -70,6 +98,11 @@ void UnpackConfig::validate() const {
     throw AppException(
         util::make_error(util::LibErr::Invalid, 0,
                          "root path is not a directory: " + root),
+        "usage");
+  if (native && idCountSpecified)
+    throw AppException(
+        util::make_error(util::LibErr::Invalid, 0,
+                         "--id-count cannot be combined with --native"),
         "usage");
   if (native && ::geteuid() != 0)
     throw AppException(

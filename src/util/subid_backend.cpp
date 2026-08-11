@@ -1,5 +1,7 @@
 #include "subid_backend.hpp"
 
+#include "util/idmap.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
@@ -71,7 +73,7 @@ bool selectRange(const std::vector<Range>& ranges, unsigned int requested,
                  unsigned int& selected) {
     for (const auto& range : ranges) {
         if (range.count >= requested && range.start <= UINT_MAX &&
-            range.start <= UINT_MAX - (requested - 1)) {
+            validIdRange(static_cast<unsigned int>(range.start), requested)) {
             selected = static_cast<unsigned int>(range.start);
             return true;
         }
@@ -174,8 +176,9 @@ SubIdResult resolveFileSubIds(const std::string& owner, uid_t ownerUid,
                               unsigned int requestedCount,
                               const std::string& subuidPath,
                               const std::string& subgidPath) {
-    if (requestedCount == 0 || requestedCount > 65535) {
-        return {{}, "error: rich ID count must be between 1 and 65535"};
+    if (requestedCount == 0 || requestedCount > MaxRichIdCount) {
+        return {{}, "error: rich ID count must be between 1 and " +
+                        std::to_string(MaxRichIdCount)};
     }
     const std::string numericOwner = std::to_string(ownerUid);
     return selectAllocation(readRanges(subuidPath, owner, numericOwner),
@@ -194,7 +197,9 @@ SubIdResult validateFileSubIds(const std::string& owner, uid_t ownerUid,
 }
 
 SubIdResult resolveHostSubIds(unsigned int requestedCount) {
-    if (requestedCount == 0) return {{}, "error: rich ID count cannot be zero"};
+    if (requestedCount == 0 || requestedCount > MaxRichIdCount)
+        return {{}, "error: rich ID count must be between 1 and " +
+                        std::to_string(MaxRichIdCount)};
     const uid_t uid = ::getuid();
     const std::string owner = ownerName(uid);
 #ifdef UNROOT_HAVE_LIBSUBID
@@ -217,9 +222,9 @@ SubIdResult resolveHostSubIds(unsigned int requestedCount) {
 }
 
 SubIdResult validateHostSubIds(const SubIdAllocation& allocation) {
-    if (allocation.count == 0 || allocation.count > 65535 ||
-        allocation.uidStart > UINT_MAX - (allocation.count - 1) ||
-        allocation.gidStart > UINT_MAX - (allocation.count - 1)) {
+    if (allocation.count == 0 || allocation.count > MaxRichIdCount ||
+        !validIdRange(allocation.uidStart, allocation.count) ||
+        !validIdRange(allocation.gidStart, allocation.count)) {
         return {{}, "error: recorded rich ID allocation is invalid"};
     }
     const uid_t uid = ::getuid();

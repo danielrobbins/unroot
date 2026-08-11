@@ -51,15 +51,18 @@ util::IdMapPlan resolvedMap(const fs::path& root, util::IdMapMode mode,
   return std::move(result.plan);
 }
 
-util::IdMapPlan unpackMap(const fs::path& root, util::IdMapMode mode) {
+util::IdMapPlan unpackMap(const fs::path& root, util::IdMapMode mode,
+                          unsigned int count, bool specified) {
   auto stored = meta::readIdMap(root);
   if (!stored.error.empty()) fail("idmap: " + stored.error);
   if (stored.found) {
     if (stored.plan.mode != mode)
       fail("requested ownership mode differs from initialized rootfs");
-    return resolvedMap(root, mode, util::subordinateIdCount(stored.plan), true);
+    const unsigned int storedCount = util::subordinateIdCount(stored.plan);
+    return resolvedMap(root, mode, specified ? count : storedCount, specified);
   }
-  auto selected = meta::selectIdMap(mode, mode == util::IdMapMode::Rich ? 65535 : 0);
+  auto selected = meta::selectIdMap(
+      mode, mode == util::IdMapMode::Rich ? count : 0);
   if (!selected) fail("idmap: " + selected.error);
   return std::move(selected.plan);
 }
@@ -206,7 +209,7 @@ int ArchiveAction::perform(const UnpackConfig& config) {
 
   const auto mode = config.native ? util::IdMapMode::Native
                                   : util::IdMapMode::Rich;
-  auto idmap = unpackMap(root, mode);
+  auto idmap = unpackMap(root, mode, config.idCount, config.idCountSpecified);
 
   fs::create_directories(root, error);
   if (error) fail("unable to create ROOT: " + error.message());

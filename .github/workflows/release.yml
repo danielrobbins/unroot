@@ -77,8 +77,8 @@ jobs:
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo sed -i "/^${USER}:/d" /etc/subuid /etc/subgid
-          printf '%s:1000000:65536\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
-          printf '%s:1000000:65536\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
+          printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
+          printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
       - name: Build authoritative artifact
         run: >-
           python3 scripts/release.py build

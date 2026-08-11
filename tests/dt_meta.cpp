@@ -46,6 +46,21 @@ TEST_CASE("rootfs metadata persists the exact kernel ID map") {
     CHECK(json["idmap"]["gid_map"][1]["outside"] == 200000);
 }
 
+TEST_CASE("rootfs metadata persists a larger rich ID map") {
+    MetaTree tree;
+    auto plan = util::makeRichIdMap(1000, 2000, 100000, 300000, 100000,
+                                    "files");
+
+    auto initialized = meta::initializeIdMap(tree.root, plan);
+    REQUIRE(initialized);
+
+    auto loaded = meta::readIdMap(tree.root);
+    REQUIRE(loaded);
+    CHECK(util::subordinateIdCount(loaded.plan) == 100000);
+    CHECK(loaded.plan.uids == plan.uids);
+    CHECK(loaded.plan.gids == plan.gids);
+}
+
 TEST_CASE("existing rootfs metadata wins initialization races") {
     MetaTree tree;
     auto first = util::makeRichIdMap(1000, 1000, 100000, 100000, 16,

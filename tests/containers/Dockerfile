@@ -12,8 +12,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home unroot \
-    && printf 'unroot:1000000:65536\n' >> /etc/subuid \
-    && printf 'unroot:1000000:65536\n' >> /etc/subgid \
+    && printf 'unroot:1000000:200000\n' >> /etc/subuid \
+    && printf 'unroot:1000000:200000\n' >> /etc/subgid \
     && install -d -o unroot -g unroot /source
 
 WORKDIR /source

@@ -248,6 +248,18 @@ IDs 100000–165535 (65,536 IDs) to your account, which is enough for most
 rootfs workflows. The kernel then maps these host IDs to the rootfs's users
 and groups, preserving multi-user ownership without requiring host root.
 
+The default rich root represents logical IDs 0–65535. If an archive uses a
+higher UID or GID, allocate sufficient subordinate IDs and choose the required
+headroom when creating the root:
+
+```bash
+unroot unpack --id-count 100000 rootfs.tar.xz ~/roots/large-ids
+```
+
+`--id-count` excludes rootfs ID 0, so this example represents IDs 0–100000 and
+requires contiguous subordinate UID and GID ranges of at least 100,000 IDs.
+The selected map is recorded and revalidated on every later entry.
+
 Foreign architecture execution is automatic — unroot detects the executable type
 and selects an appropriate emulator. If QEMU user-mode emulation is already
 installed and registered on your host, unroot will reuse it. For rich roots, you

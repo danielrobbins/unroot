@@ -1,5 +1,6 @@
 #include "util/subid.hpp"
 #include "util/subid_backend.hpp"
+#include "util/idmap.hpp"
 #include "../build/version.hpp"
 
 #include <charconv>
@@ -40,8 +41,13 @@ int main(int argc, char** argv) {
                           parseId(argv[3], uidStart) &&
                           parseId(argv[4], gidStart) &&
                           parseId(argv[5], count);
-    if ((!select && !validate) || count < 1 || count > 65535) {
-        std::cerr << "error: ID map count must be between 1 and 65535\n";
+    if ((!select && !validate) || count < 1 ||
+        count > util::MaxRichIdCount ||
+        (validate &&
+         (!util::validIdRange(uidStart, count) ||
+          !util::validIdRange(gidStart, count)))) {
+        std::cerr << "error: ID map values must describe ranges between 0 and "
+                  << util::MaxMappedId << '\n';
         return 2;
     }
 

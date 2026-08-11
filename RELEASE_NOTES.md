@@ -1,3 +1,14 @@
+# Unroot 1.0.3
+
+**In Development**
+
+- `unroot unpack --id-count COUNT` can create rich roots with ownership
+  headroom beyond the default IDs 0–65535. The selected subordinate UID/GID
+  extents are persisted and revalidated on every later entry. Existing roots
+  remain unchanged, while older Unroot versions will reject new roots whose
+  recorded count exceeds their former limit.
+  ([#19](https://github.com/danielrobbins/unroot/issues/19))
+
 # Unroot 1.0.2
 
 **Maintenance Release** — August 7, 2026

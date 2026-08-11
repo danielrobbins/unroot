@@ -27,7 +27,7 @@ In practical terms, `unroot` supports several useful workflows:
 ## SYNOPSIS
 
 ```text
-unroot unpack ARCHIVE ROOT
+unroot unpack [--id-count COUNT] ARCHIVE ROOT
 sudo unroot unpack --native ARCHIVE ROOT
 unroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
@@ -81,11 +81,11 @@ The archive is host-independent, while its binaries retain the rootfs's target a
 
 ## ROOTFS ARCHIVES
 
-`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.
+`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. `--id-count COUNT` selects a larger or smaller subordinate extent when the archive needs different ownership headroom. *COUNT* excludes rootfs ID 0, so `--id-count 100000` represents logical IDs 0 through 100000. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.
 
 `sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.
 
-Both forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. A conflicting requested mode is rejected.
+Both forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. With no `--id-count`, its recorded count is reused; an explicitly conflicting mode or count is rejected.
 
 `unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.
 
@@ -138,7 +138,7 @@ Use `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--
 
 A managed rootfs has an authoritative ownership record in `.unroot/meta.json`:
 
-* *Rich ownership* uses a user namespace. Rootfs ID 0 maps to the invoking host user, and one contiguous subordinate range represents IDs 1 through 65535. `unroot unpack` creates this mode by default.
+* *Rich ownership* uses a user namespace. Rootfs ID 0 maps to the invoking host user, and one contiguous subordinate range represents IDs 1 through 65535 by default. `unroot unpack --id-count COUNT` selects different headroom when the account has sufficiently large subordinate UID and GID allocations.
 * *Native ownership* uses host IDs unchanged and does not create a user namespace. `sudo unroot unpack --native` creates this mode.
 * *Single-ID ownership* maps only the invoking UID and GID to namespace ID 0. Request it explicitly for an unmanaged rootfs with `unroot enter --single ROOT`.
 
@@ -146,7 +146,7 @@ A managed rootfs has an authoritative ownership record in `.unroot/meta.json`:
 
 An existing rootfs with no metadata is not guessed. Use `unroot enter --single ROOT` for a single-owner tree, or `sudo unroot enter --native ROOT` to state that its host-visible ownership is intentional. Neither unmanaged form creates `.unroot` metadata. Use `unroot unpack` when a portable managed rootfs is desired.
 
-Rich ownership requires suitable subordinate-ID allocations and the `unroot-util`, `newuidmap`, and `newgidmap` helpers. `unroot-util` must be installed beside `unroot`. When built with libsubid, it uses the host's configured subordinate-ID provider; otherwise it reads `/etc/subuid` and `/etc/subgid` directly. The initial release requires one contiguous subordinate UID range and one contiguous subordinate GID range of at least 65535 IDs.
+Rich ownership requires suitable subordinate-ID allocations and the `unroot-util`, `newuidmap`, and `newgidmap` helpers. `unroot-util` must be installed beside `unroot`. When built with libsubid, it uses the host's configured subordinate-ID provider; otherwise it reads `/etc/subuid` and `/etc/subgid` directly. Each rich root requires one contiguous subordinate UID range and one contiguous subordinate GID range at least as large as its selected ID count.
 
 ### Filesystem setup
 
@@ -197,6 +197,10 @@ Enter an unmanaged host-owned rootfs, or create a native rootfs with `unpack`. R
 ### --force
 
 Allow `pack` or `unpack` to continue when the host GNU tar reports that requested extended filesystem metadata cannot be preserved. The capability warning is still displayed. This option does not override tar execution errors.
+
+### --id-count COUNT
+
+Set the number of subordinate UIDs and GIDs represented by a new rich root. The default is 65535. *COUNT* excludes rootfs ID 0, so a count of 100000 represents rootfs IDs 0 through 100000. The invoking account must have contiguous subordinate UID and GID allocations of at least this size. This option cannot be combined with `--native`.
 
 ### --cwd DIRECTORY
 

@@ -33,6 +33,8 @@ class UnpackConfig : public ActionConfig {
   std::string root;
   bool native = false;
   bool force = false;
+  unsigned int idCount = util::DefaultRichIdCount;
+  bool idCountSpecified = false;
 
   std::string getActionName() const override { return "unpack"; }
   void validate() const override;

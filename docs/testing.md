@@ -27,8 +27,8 @@ exercised through the shipped Unroot executable. The suite verifies:
 
 - explicit rooted single-ID mapping and required `setgroups` denial;
 - rich subordinate ID mapping, host ownership translation, durable metadata,
-  live supplementary-group changes, implicit map reuse, and refusal of stale
-  or conflicting mappings;
+  configurable mapping size, high logical IDs, live supplementary-group
+  changes, implicit map reuse, and refusal of stale or conflicting mappings;
 - managed rich entry and privileged native ownership and entry;
 - working-directory and environment propagation;
 - rooted `PATH` command lookup;

@@ -1,5 +1,6 @@
 #include "subid.hpp"
 
+#include "util/idmap.hpp"
 #include "util/fd.hpp"
 
 #include <cerrno>
@@ -38,10 +39,13 @@ SubIdResult parseResponse(const std::string& output) {
     unsigned long count = 0;
 
     if (!(input >> protocol >> uidStart >> gidStart >> count >> source) ||
-        protocol != SubIdProtocol || count == 0 || count > 65535 ||
+        protocol != SubIdProtocol || count == 0 ||
+        count > MaxRichIdCount ||
         uidStart > UINT_MAX || gidStart > UINT_MAX || count > UINT_MAX ||
-        uidStart > UINT_MAX - (count - 1) ||
-        gidStart > UINT_MAX - (count - 1)) {
+        !validIdRange(static_cast<unsigned int>(uidStart),
+                      static_cast<unsigned int>(count)) ||
+        !validIdRange(static_cast<unsigned int>(gidStart),
+                      static_cast<unsigned int>(count))) {
         return {{}, "error: invalid response from unroot-util"};
     }
     input >> std::ws;
@@ -124,8 +128,9 @@ SubIdResult runHelper(const std::vector<std::string>& arguments,
 
 SubIdResult querySubIdAllocation(unsigned int requestedCount,
                                  const std::string& helperPath) {
-    if (requestedCount == 0 || requestedCount > 65535) {
-        return {{}, "error: rich ID count must be between 1 and 65535"};
+    if (requestedCount == 0 || requestedCount > MaxRichIdCount) {
+        return {{}, "error: rich ID count must be between 1 and " +
+                        std::to_string(MaxRichIdCount)};
     }
 
     auto result = runHelper({"unroot-util", "idmap", "--count",
@@ -137,9 +142,9 @@ SubIdResult querySubIdAllocation(unsigned int requestedCount,
 
 SubIdResult validateSubIdAllocation(const SubIdAllocation& allocation,
                                     const std::string& helperPath) {
-    if (allocation.count == 0 || allocation.count > 65535 ||
-        allocation.uidStart > UINT_MAX - (allocation.count - 1) ||
-        allocation.gidStart > UINT_MAX - (allocation.count - 1)) {
+    if (allocation.count == 0 || allocation.count > MaxRichIdCount ||
+        !validIdRange(allocation.uidStart, allocation.count) ||
+        !validIdRange(allocation.gidStart, allocation.count)) {
         return {{}, "error: recorded rich ID allocation is invalid"};
     }
     auto result = runHelper(

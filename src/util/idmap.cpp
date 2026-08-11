@@ -7,9 +7,8 @@ namespace util {
 namespace {
 
 bool validExtent(const IdMapExtent& extent) {
-    return extent.count != 0 &&
-           extent.inside <= UINT_MAX - (extent.count - 1) &&
-           extent.outside <= UINT_MAX - (extent.count - 1);
+    return validIdRange(extent.inside, extent.count) &&
+           validIdRange(extent.outside, extent.count);
 }
 
 bool validRoot(const IdMapExtent& extent) {
@@ -60,7 +59,7 @@ std::string validateIdMapPlan(const IdMapPlan& plan) {
     if (plan.mode == IdMapMode::Rich) {
         if (plan.uids[1].inside != 1 || plan.gids[1].inside != 1 ||
             plan.uids[1].count != plan.gids[1].count ||
-            plan.uids[1].count > 65535)
+            plan.uids[1].count > MaxRichIdCount)
             return "rich ID map must use one contiguous subordinate extent";
         if (overlaps(plan.uids[0], plan.uids[1]) ||
             overlaps(plan.gids[0], plan.gids[1]))

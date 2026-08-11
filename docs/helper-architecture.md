@@ -45,7 +45,10 @@ unroot-idmap-v1 UID_START GID_START COUNT SOURCE
 
 Selection is requested with `idmap --count COUNT`; validation uses
 `idmap --validate UID_START GID_START COUNT`. Both return the same record, and
-validation succeeds only for the exact requested allocation.
+validation succeeds only for the exact requested allocation. `COUNT` is the
+subordinate extent length and excludes rootfs ID 0. The protocol supports the
+kernel ID domain through ID 4294967294; no mapped extent may include the
+unmappable `(uid_t)-1`/`(gid_t)-1` sentinel value.
 
 `unroot` rejects a failed helper, excess output, an unknown protocol version,
 extra fields, a mismatched count, and ranges that overflow the kernel ID

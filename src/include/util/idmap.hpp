@@ -1,10 +1,20 @@
 #pragma once
 
+#include <climits>
 #include <string>
 #include <sys/types.h>
 #include <vector>
 
 namespace util {
+
+inline constexpr unsigned int DefaultRichIdCount = 65535;
+inline constexpr unsigned int MaxMappedId = UINT_MAX - 1;
+inline constexpr unsigned int MaxRichIdCount = MaxMappedId;
+
+inline bool validIdRange(unsigned int start, unsigned int count) {
+    return count != 0 && start <= MaxMappedId &&
+           count - 1 <= MaxMappedId - start;
+}
 
 enum class IdMapMode { Single, Rich, Native };
 

@@ -71,8 +71,8 @@ jobs:
         if: matrix.userns == 'enabled'
         run: |
           sudo sed -i "/^${USER}:/d" /etc/subuid /etc/subgid
-          printf '%s:1000000:65536\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
-          printf '%s:1000000:65536\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
+          printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
+          printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
       - name: Acquire real rootfs fixtures
         if: matrix.userns == 'enabled'
         run: |
@@ -214,8 +214,8 @@ jobs:
             make clean
             make util LTO=0 STRIP_BINARY=0 UNROOT_UTIL_LIBSUBID=0
             ldd bin/unroot-util | grep -q musl
-            printf "root:100000:65536\n" > /etc/subuid
-            printf "root:200000:65536\n" > /etc/subgid
+            printf "root:100000:200000\n" > /etc/subuid
+            printf "root:400000:200000\n" > /etc/subgid
             test "$(bin/unroot-util idmap --count 16)" = \
-              "unroot-idmap-v1 100000 200000 16 files"
+              "unroot-idmap-v1 100000 400000 16 files"
           '

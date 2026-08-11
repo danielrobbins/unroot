@@ -27,6 +27,15 @@ TEST_CASE("rich ID map contains root and contiguous subordinate extents") {
     CHECK(subordinateIdCount(plan) == 65535);
 }
 
+TEST_CASE("rich ID map accepts a larger configurable subordinate extent") {
+    auto plan = makeRichIdMap(1000, 2000, 100000, 300000, 100000, "files");
+
+    CHECK(validateIdMapPlan(plan).empty());
+    CHECK(plan.uids[1].inside == 1);
+    CHECK(plan.uids[1].inside + plan.uids[1].count - 1 == 100000);
+    CHECK(subordinateIdCount(plan) == 100000);
+}
+
 TEST_CASE("native ownership contains no kernel ID-map extents") {
     auto plan = makeNativeIdMap();
 
@@ -60,4 +69,23 @@ TEST_CASE("ID map rejects fragmented and inconsistent subordinate layouts") {
 TEST_CASE("ID map rejects overflowing extents") {
     auto plan = makeRichIdMap(1000, 1000, UINT_MAX, 100000, 2, "files");
     CHECK_FALSE(validateIdMapPlan(plan).empty());
+}
+
+TEST_CASE("ID map accepts extents ending at the maximum mappable ID") {
+    auto plan = makeRichIdMap(
+        1000, 1000, UINT_MAX - 16, UINT_MAX - 16, 16, "files");
+
+    CHECK(validateIdMapPlan(plan).empty());
+    CHECK(plan.uids[1].outside + plan.uids[1].count - 1 == UINT_MAX - 1);
+    CHECK(plan.gids[1].outside + plan.gids[1].count - 1 == UINT_MAX - 1);
+}
+
+TEST_CASE("ID map never represents the unmappable sentinel ID") {
+    auto insideSentinel = makeRichIdMap(
+        1000, 1000, 1, 1, UINT_MAX, "files");
+    CHECK_FALSE(validateIdMapPlan(insideSentinel).empty());
+
+    auto outsideSentinel = makeRichIdMap(
+        1000, 1000, UINT_MAX - 1, 100000, 2, "files");
+    CHECK_FALSE(validateIdMapPlan(outsideSentinel).empty());
 }

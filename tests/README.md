@@ -43,7 +43,9 @@ single-ID rootfs, rich-ID, native-ownership, and cross-architecture suites.
 
 Ubuntu builds the helper with libsubid so the rich-ID suite exercises
 provider-backed selection, persisted-map reuse, and exact-allocation
-validation. CI also builds and runs `unroot-util` against musl with its
+validation. Controlled CI allocations also qualify a 100,000-ID rich map and
+round-trip ownership at logical UID/GID 100000. CI also builds and runs
+`unroot-util` against musl with its
 direct-file fallback.
 
 The Docker qualification keeps an ordinary container as a negative control.

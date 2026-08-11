@@ -65,6 +65,19 @@ TEST_CASE("file subid backend accepts numeric owner records") {
     CHECK(result.allocation.gidStart == 4000);
 }
 
+TEST_CASE("file subid backend selects a larger requested range") {
+    TempTree tree;
+    auto uids = tree.write("subuid", "alice:100000:200000\n");
+    auto gids = tree.write("subgid", "alice:400000:200000\n");
+
+    auto result = resolveFileSubIds("alice", 1001, 100000, uids, gids);
+
+    REQUIRE(result);
+    CHECK(result.allocation.uidStart == 100000);
+    CHECK(result.allocation.gidStart == 400000);
+    CHECK(result.allocation.count == 100000);
+}
+
 TEST_CASE("file subid backend skips malformed insufficient and overflowing ranges") {
     TempTree tree;
     auto uids = tree.write(
@@ -135,6 +148,37 @@ TEST_CASE("subid allocation client accepts one exact protocol record") {
     CHECK(result.allocation.gidStart == 2000);
     CHECK(result.allocation.count == 16);
     CHECK(result.allocation.source == "files");
+}
+
+TEST_CASE("subid allocation client accepts a larger protocol count") {
+    TempTree tree;
+    auto helper = tree.write(
+        "unroot-util",
+        "#!/bin/sh\nprintf '%s\\n' 'unroot-idmap-v1 100000 300000 100000 files'\n",
+        true);
+
+    auto result = querySubIdAllocation(100000, helper);
+
+    REQUIRE(result);
+    CHECK(result.allocation.uidStart == 100000);
+    CHECK(result.allocation.gidStart == 300000);
+    CHECK(result.allocation.count == 100000);
+}
+
+TEST_CASE("subid allocation client accepts the maximum mappable boundary") {
+    TempTree tree;
+    auto helper = tree.write(
+        "unroot-util",
+        "#!/bin/sh\nprintf '%s\\n' 'unroot-idmap-v1 4294967279 4294967279 16 files'\n",
+        true);
+
+    auto result = querySubIdAllocation(16, helper);
+
+    REQUIRE(result);
+    CHECK(result.allocation.uidStart + result.allocation.count - 1 ==
+          UINT_MAX - 1);
+    CHECK(result.allocation.gidStart + result.allocation.count - 1 ==
+          UINT_MAX - 1);
 }
 
 TEST_CASE("subid allocation client validates the recorded protocol values") {
@@ -216,7 +260,7 @@ TEST_CASE("subid allocation client validates count and helper availability") {
     auto missing = tree.root / "missing";
 
     CHECK_FALSE(querySubIdAllocation(0, missing));
-    CHECK_FALSE(querySubIdAllocation(65536, missing));
+    CHECK_FALSE(querySubIdAllocation(UINT_MAX, missing));
     auto result = querySubIdAllocation(16, missing);
     CHECK_FALSE(result);
     CHECK(result.error.find("requires unroot-util installed next to unroot") !=
