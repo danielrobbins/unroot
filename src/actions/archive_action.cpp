@@ -142,21 +142,19 @@ class ArchiveOutput {
  public:
   explicit ArchiveOutput(const fs::path& destination)
       : destination_(destination) {
-    const std::string suffix = destination.extension().string();
     std::string pattern =
-        (destination.parent_path() /
-         ("." + destination.filename().string() + ".unroot-tmp-XXXXXX" +
-          suffix))
-            .string();
+        (destination.parent_path() / ".unroot-archive-XXXXXX").string();
     std::vector<char> writable(pattern.begin(), pattern.end());
     writable.push_back('\0');
-    UniqueFd file(::mkstemps(writable.data(), static_cast<int>(suffix.size())));
-    if (!file) fail("unable to create temporary archive output");
-    temporary_ = writable.data();
+    char* directory = ::mkdtemp(writable.data());
+    if (!directory) fail("unable to create temporary archive directory");
+    directory_ = directory;
+    temporary_ = directory_ / destination.filename();
   }
 
   ~ArchiveOutput() {
     if (!temporary_.empty()) (void)::unlink(temporary_.c_str());
+    if (!directory_.empty()) (void)::rmdir(directory_.c_str());
   }
 
   const fs::path& path() const { return temporary_; }
@@ -165,10 +163,12 @@ class ArchiveOutput {
     if (::rename(temporary_.c_str(), destination_.c_str()) != 0)
       fail("unable to publish archive output");
     temporary_.clear();
+    if (::rmdir(directory_.c_str()) == 0) directory_.clear();
   }
 
  private:
   fs::path destination_;
+  fs::path directory_;
   fs::path temporary_;
 };
 
@@ -246,17 +246,17 @@ int ArchiveAction::perform(const UnpackConfig& config) {
   auto archiveLock = util::acquireArchiveLock(root, true);
   if (!archiveLock) fail(archiveLock.error);
   const fs::path pinnedRoot = archiveLock.pinnedRoot();
+  const std::string tar = tarPath();
+  validateArchive(tar, archive);
+  if (isWithin(root, archive)) fail("archive source must be outside ROOT");
+  if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
+  if (rootfsHasPayload(pinnedRoot)) fail("ROOT must be empty before unpacking");
+  requireMetadataSupport(tar, config.force);
+
   const auto mode = config.native ? util::IdMapMode::Native
                                   : util::IdMapMode::Rich;
   auto idmap = unpackMap(pinnedRoot, mode, config.idCount,
                          config.idCountSpecified);
-  const std::string tar = tarPath();
-  validateArchive(tar, archive);
-  if (isWithin(root, archive)) fail("archive source must be outside ROOT");
-  requireMetadataSupport(tar, config.force);
-
-  if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
-  if (rootfsHasPayload(pinnedRoot)) fail("ROOT must be empty before unpacking");
   archiveLock.preserveRoot();
   auto initialized = meta::initializeIdMap(pinnedRoot, idmap, root);
   if (!initialized) fail("idmap: " + initialized.error);

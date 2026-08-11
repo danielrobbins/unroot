@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -254,11 +255,12 @@ def test_failed_pack_does_not_publish_partial_archive(
     tool = tools / "tar"
     tool.write_text(
         f"""#!/bin/sh
-case " $* " in
-  *" --create "*" --file=/dev/null "*) exec {real_tar} "$@" ;;
-  *" --create "*) exit 42 ;;
-  *) exec {real_tar} "$@" ;;
-esac
+for argument do
+    if [ "$argument" = --file=/dev/null ]; then
+        exec {real_tar} "$@"
+    fi
+done
+exit 42
 """,
         encoding="utf-8",
     )
@@ -272,7 +274,23 @@ esac
 
     assert result.returncode == 42
     assert not archive.exists()
-    assert not list(tmp_path.glob(f".{archive.name}.unroot-tmp-*"))
+    assert not list(tmp_path.glob(".unroot-archive-*"))
+
+
+def test_packed_archive_honors_process_umask(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "mode.tar"
+    previous = os.umask(0o027)
+    try:
+        result = unroot.run("pack", str(managed_rootfs), str(archive))
+    finally:
+        os.umask(previous)
+
+    result.assert_ok()
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o640
 
 
 def test_pack_and_unpack_reject_an_active_rootfs_archive_lock(
