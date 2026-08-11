@@ -8,6 +8,11 @@
   remain unchanged, while older Unroot versions will reject new roots whose
   recorded count exceeds their former limit.
   ([#19](https://github.com/danielrobbins/unroot/issues/19))
+- `pack` and `unpack` now take one self-cleaning exclusive lock per rootfs, so
+  archive reads and writes cannot overlap on the same tree. A competing command
+  fails immediately, while process exit automatically releases ownership and
+  leaves no stale lock file.
+  ([#27](https://github.com/danielrobbins/unroot/issues/27))
 
 # Unroot 1.0.2
 

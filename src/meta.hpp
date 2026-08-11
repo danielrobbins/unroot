@@ -34,7 +34,8 @@ bool ensureVersionAndSchema(nlohmann::json& j, const fs::path& rootfs,
 
 IdMapMetaResult readIdMap(const fs::path& rootfs);
 IdMapMetaResult initializeIdMap(const fs::path& rootfs,
-                                const util::IdMapPlan& plan);
+                                const util::IdMapPlan& plan,
+                                const fs::path& recordedRoot = {});
 IdMapMetaResult selectIdMap(util::IdMapMode mode, unsigned int richCount);
 IdMapMetaResult resolveIdMap(const fs::path& rootfs, util::IdMapMode mode,
                              unsigned int richCount, bool specified);

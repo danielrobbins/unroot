@@ -89,6 +89,8 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 
 `unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.
 
+Only one archive operation may use a rootfs at a time. `pack` and `unpack` take an exclusive operating-system lock on the pinned root directory and fail immediately when another archive operation is active. Process exit automatically releases the lock, with no lock file to become stale.
+
 `pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:
 
 ```console

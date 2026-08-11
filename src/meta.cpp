@@ -57,7 +57,8 @@ static std::string metaToJsonString(const MetaObj& m) {
 }
 
 static std::string initialMeta(const fs::path& rootfs,
-                               const util::IdMapPlan& idmap) {
+                               const util::IdMapPlan& idmap,
+                               const fs::path& recordedRoot) {
   std::time_t now = std::time(nullptr);
   char created[32];
   std::strftime(created, sizeof(created), "%Y-%m-%dT%H:%M:%SZ",
@@ -66,7 +67,8 @@ static std::string initialMeta(const fs::path& rootfs,
                created,
                "shared-rw",
                idmap,
-               {rootfs.string(), rootfs.string()},
+               {(recordedRoot.empty() ? rootfs : recordedRoot).string(),
+                (recordedRoot.empty() ? rootfs : recordedRoot).string()},
                resolveFeatureNamesFromEnv()};
   return metaToJsonString(meta);
 }
@@ -154,7 +156,8 @@ IdMapMetaResult readIdMap(const fs::path& rootfs) {
 }
 
 IdMapMetaResult initializeIdMap(const fs::path& rootfs,
-                                const util::IdMapPlan& plan) {
+                                const util::IdMapPlan& plan,
+                                const fs::path& recordedRoot) {
   if (plan.mode == util::IdMapMode::Single)
     return {false, false, {},
             "single-ID mode does not initialize rootfs metadata"};
@@ -171,7 +174,7 @@ IdMapMetaResult initializeIdMap(const fs::path& rootfs,
   if (root.readText(MetaPath, content)) return parseIdMapMeta(content);
   if (errno != ENOENT)
     return {false, false, {}, "unable to read rootfs metadata"};
-  content = initialMeta(rootfs, plan);
+  content = initialMeta(rootfs, plan, recordedRoot);
   if (!root.writeTextAtomic(MetaPath, content, 0600))
     return {false, false, {}, "unable to write rootfs metadata"};
   auto result = parseIdMapMeta(content);

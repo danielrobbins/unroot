@@ -98,6 +98,7 @@ CPP_SOURCES := \
 	$(SRC_DIR)/actions/enter_config.cpp \
 	$(SRC_DIR)/actions/enter_action.cpp \
 	$(SRC_DIR)/actions/parsed_args.cpp \
+	$(SRC_DIR)/util/archive_lock.cpp \
 	$(SRC_DIR)/util/path.cpp \
 	$(SRC_DIR)/util/idmap.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
@@ -522,6 +523,7 @@ DOCTEST_HARNESS_SRCS := \
 	src/actions/unified_action_registry.cpp \
 	src/actions/parsed_args.cpp \
 	src/program_context.cpp \
+	src/util/archive_lock.cpp \
 	src/util/path.cpp \
 	src/util/idmap.cpp \
 	src/util/rootfs.cpp \

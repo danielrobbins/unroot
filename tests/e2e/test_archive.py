@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -73,6 +74,73 @@ exit 0
     )
     tool.chmod(0o755)
     return tool
+
+
+def _blocking_tar(tmp_path: Path) -> tuple[Path, Path, Path]:
+    real_tar = shutil.which("tar")
+    assert real_tar is not None
+    tools = tmp_path / "blocking-tools"
+    tools.mkdir()
+    started = tmp_path / "tar-started"
+    release = tmp_path / "tar-release"
+    tool = tools / "tar"
+    tool.write_text(
+        f"""#!/bin/sh
+case " $* " in
+  *" --create "*|*" --extract "*)
+    case " $* " in
+      *" --file=/dev/null "*) ;;
+      *)
+        : > {started}
+        while [ ! -e {release} ]; do read -r _ < /dev/null || :; done
+        ;;
+    esac
+    ;;
+esac
+exec {real_tar} "$@"
+""",
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    return tools, started, release
+
+
+def _start_unroot(
+    unroot: UnrootRunner,
+    arguments: list[str],
+    env: dict[str, str],
+) -> subprocess.Popen[str]:
+    process_env = dict(os.environ)
+    for name in tuple(process_env):
+        if name.startswith("UNROOT_"):
+            process_env.pop(name)
+    process_env.update(env)
+    process_env["UNROOT_SUDO"] = str(unroot.sudo_guard)
+    process_env["LC_ALL"] = "C"
+    return subprocess.Popen(
+        [str(unroot.binary), *arguments],
+        cwd=unroot.repo,
+        env=process_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+
+
+def _wait_for_path(path: Path, process: subprocess.Popen[str]) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            pytest.fail(
+                f"archive owner exited before reaching tar\n"
+                f"stdout:\n{stdout}\nstderr:\n{stderr}"
+            )
+        time.sleep(0.01)
+    pytest.fail("archive owner did not reach tar")
 
 
 def _assert_payload_tree(root: Path) -> None:
@@ -172,6 +240,148 @@ def test_pack_rejects_tar_that_cannot_preserve_metadata(
     assert "POSIX ACL support is not available" in result.stderr
     assert "Use --force to accept metadata loss" in result.stderr
     assert not archive.exists()
+
+
+def test_failed_pack_does_not_publish_partial_archive(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+) -> None:
+    tools = tmp_path / "failing-tools"
+    tools.mkdir()
+    real_tar = shutil.which("tar")
+    assert real_tar is not None
+    tool = tools / "tar"
+    tool.write_text(
+        f"""#!/bin/sh
+case " $* " in
+  *" --create "*" --file=/dev/null "*) exec {real_tar} "$@" ;;
+  *" --create "*) exit 42 ;;
+  *) exec {real_tar} "$@" ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    archive = tmp_path / "partial.tar"
+    path = str(tools) + os.pathsep + os.environ.get("PATH", "")
+
+    result = unroot.run(
+        "pack", str(managed_rootfs), str(archive), env={"PATH": path}
+    )
+
+    assert result.returncode == 42
+    assert not archive.exists()
+    assert not list(tmp_path.glob(f".{archive.name}.unroot-tmp-*"))
+
+
+def test_pack_and_unpack_reject_an_active_rootfs_archive_lock(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+) -> None:
+    import fcntl
+
+    _require_gnu_tar()
+    archive = tmp_path / "input.tar"
+    unroot.run("pack", str(managed_rootfs), str(archive)).assert_ok()
+
+    descriptor = os.open(managed_rootfs, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        packed = unroot.run(
+            "pack", str(managed_rootfs), str(tmp_path / "blocked.tar")
+        )
+        assert packed.returncode != 0
+        assert "archive operation is already active for ROOT" in packed.stderr
+
+        unpacked = unroot.run("unpack", str(archive), str(managed_rootfs))
+        assert unpacked.returncode != 0
+        assert "archive operation is already active for ROOT" in unpacked.stderr
+    finally:
+        os.close(descriptor)
+
+
+def test_unpack_rejects_an_active_lock_before_root_creation(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+) -> None:
+    import fcntl
+
+    _require_gnu_tar()
+    archive = tmp_path / "input.tar"
+    unroot.run("pack", str(managed_rootfs), str(archive)).assert_ok()
+    root = tmp_path / "new-root"
+    root.mkdir()
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        result = unroot.run("unpack", str(archive), str(root))
+
+        assert result.returncode != 0
+        assert "archive operation is already active for ROOT" in result.stderr
+        assert not any(root.iterdir())
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize(
+    ("owner_action", "contender_action"),
+    [
+        ("pack", "pack"),
+        ("pack", "unpack"),
+        ("unpack", "pack"),
+        ("unpack", "unpack"),
+    ],
+)
+def test_archive_operation_pairs_share_one_rootfs_lock(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    tmp_path: Path,
+    owner_action: str,
+    contender_action: str,
+) -> None:
+    _require_gnu_tar()
+    source_archive = tmp_path / "source.tar"
+    unroot.run("pack", str(managed_rootfs), str(source_archive)).assert_ok()
+    root = managed_rootfs
+    if owner_action == "unpack":
+        root = tmp_path / "unpack-root"
+
+    tools, started, release = _blocking_tar(tmp_path)
+    path = str(tools) + os.pathsep + os.environ.get("PATH", "")
+    owner_arguments = (
+        ["pack", str(root), str(tmp_path / "owner.tar")]
+        if owner_action == "pack"
+        else ["unpack", str(source_archive), str(root)]
+    )
+    owner = _start_unroot(unroot, owner_arguments, {"PATH": path})
+    try:
+        _wait_for_path(started, owner)
+        contender = (
+            unroot.run(
+                "pack",
+                str(root),
+                str(tmp_path / "contender.tar"),
+                env={"PATH": path},
+            )
+            if contender_action == "pack"
+            else unroot.run(
+                "unpack",
+                str(source_archive),
+                str(root),
+                env={"PATH": path},
+            )
+        )
+        assert contender.returncode != 0
+        assert "archive operation is already active for ROOT" in contender.stderr
+    finally:
+        release.touch()
+        stdout, stderr = owner.communicate(timeout=10)
+    assert owner.returncode == 0, f"stdout:\n{stdout}\nstderr:\n{stderr}"
 
 
 def test_unpack_refuses_to_overlay_an_existing_tree(
