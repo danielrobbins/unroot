@@ -81,6 +81,8 @@ The archive is host-independent, while its binaries retain the rootfs's target a
 
 ## ROOTFS ARCHIVES
 
+Unroot currently supports raw root filesystem tar archives. Filesystem entries such as `bin/`, `etc/`, `usr/`, and `var/` must appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Unroot does not currently strip a wrapping directory or import OCI/container-image layouts, disk images, installer media, or distribution-specific bundles. Additional formats may be supported in the future.
+
 `unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. `--id-count COUNT` selects a larger or smaller subordinate extent when the archive needs different ownership headroom. *COUNT* excludes rootfs ID 0, so `--id-count 100000` represents logical IDs 0 through 100000. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.
 
 `sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.

@@ -286,6 +286,12 @@ native-architecture builds are unaffected.
 
 ## Rootfs Archives
 
+Unroot currently supports raw root filesystem tar archives, with filesystem
+entries such as `bin/`, `etc/`, and `usr/` directly at the archive root. Gentoo
+and Funtoo stage tarballs are common examples. Wrapping directories,
+OCI/container-image layouts, disk images, and installer media are not currently
+supported; additional formats may be added in the future.
+
 `unroot unpack ARCHIVE ROOT` creates a managed rich rootfs and extracts the
 archive inside its subordinate-ID mapping. It preflights helper binaries and ID
 ranges before creating `ROOT`, avoiding partial extraction when the host isn't
