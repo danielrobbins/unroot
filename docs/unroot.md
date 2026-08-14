@@ -112,9 +112,11 @@ The reverse works for a managed native root: run `sudo unroot pack` on that root
 
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 
-Before modifying a rootfs, Unroot opens and pins the input archive and performs a complete metadata inspection. Unsafe paths, the reserved `.unroot` tree, OCI image layouts, malformed archives, and ownership outside the selected ID map are rejected before extraction. Recoverable libarchive metadata warnings fail closed by default; use `--force` only when the resulting reduction in archive fidelity is understood and acceptable.
+Unroot's ACL contract is limited to POSIX ACLs, matching the supported tar metadata path. It does not interpret NFSv4 ACL semantics. Any filesystem-specific representation carried as an extended attribute remains opaque xattr metadata and follows the extended-attribute preservation path.
 
-Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but structural, ownership, and host-capability checks complete before extraction starts.
+Before modifying a rootfs, Unroot opens and pins the input archive and performs a complete metadata inspection. Unsafe paths, the reserved `.unroot` tree, OCI image layouts, malformed archives, and ownership outside the selected ID map are rejected before extraction. When that inspection finds POSIX ACLs or extended attributes, Unroot performs a quick capability check on the exact destination filesystem and rejects an incompatible destination before extraction. This check does not reopen or rescan the archive. Recoverable metadata limitations fail closed by default; use `--force` only when the resulting reduction in archive fidelity is understood and acceptable.
+
+Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but structural, ownership, and required destination-capability checks complete before extraction starts.
 
 ## INSPECTION
 
@@ -276,7 +278,7 @@ Enter an unmanaged host-owned rootfs, or create a native rootfs with `unpack`. R
 
 ### --force
 
-Allow `pack` or `unpack` to continue after a recoverable libarchive metadata warning. The warning is still displayed. This option does not override unsafe archive structure, ownership-map violations, corrupt data, or archive-engine failures.
+Allow `pack` or `unpack` to continue after a recoverable libarchive metadata warning or a reported destination metadata limitation. The warning is still displayed. This option does not override unsafe archive structure, ownership-map violations, corrupt data, or archive-engine failures.
 
 ### --id-count COUNT
 

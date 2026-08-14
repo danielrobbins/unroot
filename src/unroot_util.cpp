@@ -3,8 +3,10 @@
 #include "util/idmap.hpp"
 #include "util/archive_inspector.hpp"
 #include "util/archive_engine.hpp"
+#include "util/filesystem_probe.hpp"
 #include "util/rootfs.hpp"
 #include "archive_report.hpp"
+#include "filesystem_caps.hpp"
 #include "../build/version.hpp"
 
 #include <charconv>
@@ -26,6 +28,7 @@ void usage() {
                  "       unroot-util archive inspect --fd FD\n"
                  "       unroot-util archive unpack --fd FD\n"
                  "       unroot-util archive pack --fd FD --filter FILTER\n"
+                 "       unroot-util filesystem inspect --fd FD\n"
                  "       unroot-util injection install ...\n"
                  "       unroot-util injection restore ...\n"
                  "       unroot-util archive --version\n";
@@ -35,6 +38,23 @@ bool parseId(const char* text, unsigned int& value) {
     const char* end = text + std::char_traits<char>::length(text);
     auto parsed = std::from_chars(text, end, value);
     return parsed.ec == std::errc() && parsed.ptr == end;
+}
+
+int filesystemCommand(int argc, char** argv) {
+    unsigned int descriptor = 0;
+    if (argc != 5 || std::string(argv[2]) != "inspect" ||
+        std::string(argv[3]) != "--fd" ||
+        !parseId(argv[4], descriptor) || descriptor > INT_MAX) {
+        usage();
+        return 2;
+    }
+    auto result = util::inspectFilesystem(static_cast<int>(descriptor));
+    if (!result) {
+        std::cerr << result.error << '\n';
+        return 1;
+    }
+    std::cout << fsinfo::makeRecord(result.caps) << '\n';
+    return 0;
 }
 
 int archiveCommand(int argc, char** argv) {
@@ -276,6 +296,8 @@ int main(int argc, char** argv) {
     }
     if (argc >= 2 && std::string(argv[1]) == "archive")
         return archiveCommand(argc, argv);
+    if (argc >= 2 && std::string(argv[1]) == "filesystem")
+        return filesystemCommand(argc, argv);
     if (argc >= 2 && std::string(argv[1]) == "injection")
         return injectionCommand(argc, argv);
     if (argc < 4 || std::string(argv[1]) != "idmap") {

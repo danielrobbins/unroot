@@ -124,9 +124,11 @@ The reverse works for a managed native root: run \fBsudo unroot pack\fR on that 
 .PP
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host\-specific top\-level \fB\&.unroot\fR tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 .PP
-Before modifying a rootfs, Unroot opens and pins the input archive and performs a complete metadata inspection. Unsafe paths, the reserved \fB\&.unroot\fR tree, OCI image layouts, malformed archives, and ownership outside the selected ID map are rejected before extraction. Recoverable libarchive metadata warnings fail closed by default; use \fB\-\-force\fR only when the resulting reduction in archive fidelity is understood and acceptable.
+Unroot's ACL contract is limited to POSIX ACLs, matching the supported tar metadata path. It does not interpret NFSv4 ACL semantics. Any filesystem\-specific representation carried as an extended attribute remains opaque xattr metadata and follows the extended\-attribute preservation path.
 .PP
-Unpacking is intentionally not an overlay operation: \fIROOT\fR must be new or empty apart from valid \fB\&.unroot\fR metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but structural, ownership, and host\-capability checks complete before extraction starts.
+Before modifying a rootfs, Unroot opens and pins the input archive and performs a complete metadata inspection. Unsafe paths, the reserved \fB\&.unroot\fR tree, OCI image layouts, malformed archives, and ownership outside the selected ID map are rejected before extraction. When that inspection finds POSIX ACLs or extended attributes, Unroot performs a quick capability check on the exact destination filesystem and rejects an incompatible destination before extraction. This check does not reopen or rescan the archive. Recoverable metadata limitations fail closed by default; use \fB\-\-force\fR only when the resulting reduction in archive fidelity is understood and acceptable.
+.PP
+Unpacking is intentionally not an overlay operation: \fIROOT\fR must be new or empty apart from valid \fB\&.unroot\fR metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but structural, ownership, and required destination\-capability checks complete before extraction starts.
 .SH INSPECTION
 .PP
 \fBunroot inspect host\fR reports current kernel, namespace, mapping\-helper, host\-helper, and archive\-engine capabilities without changing a rootfs. Availability, confirmed unavailability, and an inconclusive probe are reported separately. Use \fB\-\-json\fR for a structured support report.
@@ -281,7 +283,7 @@ Enter an unmanaged rootfs with a single UID and GID mapping. The invoking host u
 Enter an unmanaged host\-owned rootfs, or create a native rootfs with \fBunpack\fR\&. Requires host root privileges. It conflicts with a managed rich ownership record.
 .TP
 \fB\-\-force\fR
-Allow \fBpack\fR or \fBunpack\fR to continue after a recoverable libarchive metadata warning. The warning is still displayed. This option does not override unsafe archive structure, ownership\-map violations, corrupt data, or archive\-engine failures.
+Allow \fBpack\fR or \fBunpack\fR to continue after a recoverable libarchive metadata warning or a reported destination metadata limitation. The warning is still displayed. This option does not override unsafe archive structure, ownership\-map violations, corrupt data, or archive\-engine failures.
 .TP
 \fB\-\-id\-count COUNT\fR
 Set the number of subordinate UIDs and GIDs represented by a new rich root. The default is 65535. \fICOUNT\fR excludes rootfs ID 0, so a count of 100000 represents rootfs IDs 0 through 100000. The invoking account must have contiguous subordinate UID and GID allocations of at least this size. This option cannot be combined with \fB\-\-native\fR\&.

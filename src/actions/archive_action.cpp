@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fcntl.h>
+#include <iostream>
 #include <unistd.h>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "archive_config.hpp"
 #include "archive_input.hpp"
 #include "archive_inspector.hpp"
+#include "filesystem_inspector.hpp"
 #include "meta.hpp"
 #include "injections.hpp"
 #include "util/archive_lock.hpp"
@@ -125,6 +127,28 @@ void requireMappedOwnership(const archiveinfo::ArchiveReport& report,
        "with --native");
 }
 
+void requireFilesystemCapabilities(const archiveinfo::ArchiveReport& report,
+                                   const fs::path& root, bool force) {
+  const bool needsAcl = report.acls.count != 0;
+  const bool needsXattr = report.xattrs.count != 0;
+  if (!needsAcl && !needsXattr) return;
+  auto inspected = fsinfo::FilesystemInspector().inspect(root);
+  if (!inspected)
+    fail("unable to inspect destination filesystem: " + inspected.error);
+  const auto require = [&](bool needed, const fsinfo::Capability& capability,
+                           const char* metadata) {
+    if (!needed || capability.supported) return;
+    std::string message = "archive contains " + std::string(metadata) +
+                          ", but the destination filesystem cannot preserve "
+                          "them";
+    if (!capability.detail.empty()) message += ": " + capability.detail;
+    if (!force) fail(message + "; use --force to accept metadata loss");
+    std::cerr << "Warning: " << message << "; continuing due to --force\n";
+  };
+  require(needsAcl, inspected.caps.posixAcl, "POSIX ACLs");
+  require(needsXattr, inspected.caps.xattr, "extended attributes");
+}
+
 }  // namespace
 
 int ArchiveAction::perform(const PackConfig& config) {
@@ -189,6 +213,7 @@ int ArchiveAction::perform(const UnpackConfig& config) {
   if (inspection.report.unsafePaths.count != 0)
     fail("archive contains paths outside the rootfs");
   requireMappedOwnership(inspection.report, idmap);
+  requireFilesystemCapabilities(inspection.report, pinnedRoot, config.force);
   archiveLock.preserveRoot();
   auto initialized = meta::initializeIdMap(pinnedRoot, idmap, root);
   if (!initialized) fail("idmap: " + initialized.error);

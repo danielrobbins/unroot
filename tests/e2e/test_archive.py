@@ -54,6 +54,28 @@ def _create_archive(source: Path, archive: Path) -> None:
     )
 
 
+def _add_test_acl(path: Path) -> None:
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to create an ACL archive fixture")
+    result = subprocess.run(
+        [setfacl, "-m", f"u:{os.getuid()}:r", str(path)],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"test filesystem cannot create a POSIX ACL: {result.stderr}")
+
+
+def _add_test_xattr(path: Path) -> None:
+    try:
+        os.setxattr(path, "user.unroot_test", b"value")
+    except OSError as error:
+        pytest.skip(f"test filesystem cannot create an xattr: {error}")
+
+
 def _create_named_archive(archive: Path, name: str, content: bytes) -> None:
     with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as output:
         member = tarfile.TarInfo(name)
@@ -872,6 +894,159 @@ def test_unpack_rejects_reserved_metadata_before_extraction(
     operations = log.read_text(encoding="utf-8").splitlines()
     assert "archive inspect" in operations
     assert "archive unpack" not in operations
+
+
+def test_unpack_rejects_acl_incompatible_destination_before_extraction(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    source = tmp_path / "source"
+    source.mkdir()
+    payload = source / "payload"
+    payload.write_text("payload\n", encoding="utf-8")
+    _add_test_acl(payload)
+    archive = tmp_path / "input.tar"
+    _create_archive(source, archive)
+
+    report = json.loads(
+        unroot.run("inspect", "archive", str(archive), "--json").assert_ok().stdout
+    )
+    assert report["metadata"]["acls"]["count"] == 1
+
+    log = tmp_path / "operations"
+    isolated = _isolated_unroot(
+        unroot, tmp_path,
+        f"""
+printf "%s %s\n" "$1" "$2" >> {shlex.quote(str(log))}
+if [ "$1" = filesystem ] && [ "$2" = inspect ]; then
+    printf '%s\n' 'unroot-filesystem-v1 {{"posix_acl":{{"detail":"ACLs unavailable","supported":false}},"xattr":{{"detail":"","supported":true}}}}'
+    exit 0
+fi
+""",
+    )
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        isolated,
+        ["unpack", "--native", "--inject=-*", str(archive), str(root)],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "destination filesystem cannot preserve" in result.stderr
+    assert "use --force to accept metadata loss" in result.stderr
+    operations = log.read_text(encoding="utf-8").splitlines()
+    assert operations.count("archive inspect") == 1
+    assert operations.count("filesystem inspect") == 1
+    assert "archive unpack" not in operations
+    assert not root.exists()
+
+
+def test_unpack_force_accepts_acl_incompatible_destination(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    source = tmp_path / "source"
+    source.mkdir()
+    payload = source / "payload"
+    payload.write_text("payload\n", encoding="utf-8")
+    _add_test_acl(payload)
+    archive = tmp_path / "input.tar"
+    _create_archive(source, archive)
+
+    log = tmp_path / "operations"
+    isolated = _isolated_unroot(
+        unroot,
+        tmp_path,
+        f"""
+printf "%s %s\n" "$1" "$2" >> {shlex.quote(str(log))}
+if [ "$1" = filesystem ] && [ "$2" = inspect ]; then
+    printf '%s\n' 'unroot-filesystem-v1 {{"posix_acl":{{"detail":"ACLs unavailable","supported":false}},"xattr":{{"detail":"","supported":true}}}}'
+    exit 0
+fi
+""",
+    )
+    root = tmp_path / "root"
+    try:
+        result = _run_unroot(
+            isolated,
+            [
+                "unpack",
+                "--native",
+                "--force",
+                "--inject=-*",
+                str(archive),
+                str(root),
+            ],
+            {},
+            privileged_prefix,
+        )
+
+        result.assert_ok()
+        assert "continuing due to --force" in result.stderr
+        operations = log.read_text(encoding="utf-8").splitlines()
+        assert operations.count("archive inspect") == 1
+        assert operations.count("filesystem inspect") == 1
+        assert "archive unpack" in operations
+        assert (root / "payload").read_text(encoding="utf-8") == "payload\n"
+    finally:
+        run_command([*privileged_prefix, "rm", "-rf", str(root)]).assert_ok()
+
+
+def test_unpack_rejects_xattr_incompatible_destination_before_extraction(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    source = tmp_path / "source"
+    source.mkdir()
+    payload = source / "payload"
+    payload.write_text("payload\n", encoding="utf-8")
+    _add_test_xattr(payload)
+    archive = tmp_path / "input.tar"
+    _create_archive(source, archive)
+
+    report = json.loads(
+        unroot.run("inspect", "archive", str(archive), "--json").assert_ok().stdout
+    )
+    assert report["metadata"]["xattrs"]["count"] == 1
+
+    log = tmp_path / "operations"
+    isolated = _isolated_unroot(
+        unroot,
+        tmp_path,
+        f"""
+printf "%s %s\n" "$1" "$2" >> {shlex.quote(str(log))}
+if [ "$1" = filesystem ] && [ "$2" = inspect ]; then
+    printf '%s\n' 'unroot-filesystem-v1 {{"posix_acl":{{"detail":"","supported":true}},"xattr":{{"detail":"xattrs unavailable","supported":false}}}}'
+    exit 0
+fi
+""",
+    )
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        isolated,
+        ["unpack", "--native", "--inject=-*", str(archive), str(root)],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "archive contains extended attributes" in result.stderr
+    assert "xattrs unavailable" in result.stderr
+    assert "use --force to accept metadata loss" in result.stderr
+    operations = log.read_text(encoding="utf-8").splitlines()
+    assert operations.count("archive inspect") == 1
+    assert operations.count("filesystem inspect") == 1
+    assert "archive unpack" not in operations
+    assert not root.exists()
 
 
 def test_unpack_uses_the_archive_opened_before_validation(

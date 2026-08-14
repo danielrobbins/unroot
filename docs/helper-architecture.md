@@ -75,6 +75,19 @@ namespace with the pinned root as its working directory. It performs only the
 requested rooted, atomic file replacement or restoration; it never discovers
 host sources or chooses injection policy.
 
+Destination-filesystem inspection is also descriptor-first. Before extracting
+POSIX ACLs or extended attributes, the engine passes the pinned root directory
+descriptor to `unroot-util`. The helper uses one temporary file to verify the
+required metadata support on that exact filesystem, removes the file, and
+reports only the resulting capabilities. This is a fixed-size destination
+check: it never opens or scans the archive. The helper does not choose the
+destination, extraction policy, or whether reduced metadata fidelity is
+acceptable.
+
+The archive ACL surface is deliberately limited to POSIX ACLs. NFSv4 ACL
+semantics are outside Unroot's tar contract; filesystem-specific data carried
+as an extended attribute remains opaque and is handled by the xattr path.
+
 For `archive pack` and `archive unpack`, the static engine first owns all
 policy: root pinning and locking, archive inspection, ID-map selection,
 namespace creation, overwrite rules, and atomic output publication. It then
@@ -95,12 +108,12 @@ command runner. Host-provider operations belong there only when they:
 3. do not inspect or mutate the target root filesystem; and
 4. leave namespace, mount, privilege, and child-lifecycle policy in `unroot`.
 
-Archive traversal and mapped injection file operations form the deliberate
-second profile. They may run only after the engine has fixed every policy
-input. They receive descriptors and operation flags, use the current working
-directory selected by the engine, and report warnings or failure. They must
-not select roots, mappings, namespaces, overwrite policy, injection sources,
-or publication policy.
+Archive traversal, destination-filesystem probes, and mapped injection file
+operations form the deliberate second profile. They may run only after the
+engine has fixed every policy input. They receive descriptors and operation
+flags, use the selected root or current working directory, and report facts,
+warnings, or failure. They must not select roots, mappings, namespaces,
+overwrite policy, injection sources, or publication policy.
 
 This gives future host-integration problems a clean outlet without weakening
 the static engine's portability or scattering provider-specific conditionals

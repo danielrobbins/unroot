@@ -128,9 +128,11 @@ endif
 UTIL_SOURCES := \
 	$(SRC_DIR)/unroot_util.cpp \
 	$(SRC_DIR)/archive_report.cpp \
+	$(SRC_DIR)/filesystem_caps.cpp \
 	$(SRC_DIR)/util/archive_fd.cpp \
 	$(SRC_DIR)/util/archive_engine.cpp \
 	$(SRC_DIR)/util/archive_inspector.cpp \
+	$(SRC_DIR)/util/filesystem_probe.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
 	$(SRC_DIR)/util/subid_backend.cpp
 UTIL_BUILD_DIR := $(BUILD_DIR)/unroot-util/subid-$(UTIL_HAVE_LIBSUBID)-archive-$(UTIL_HAVE_LIBARCHIVE)
@@ -167,6 +169,8 @@ CPP_SOURCES := \
 	$(SRC_DIR)/archive_input.cpp \
 	$(SRC_DIR)/archive_inspector.cpp \
 	$(SRC_DIR)/archive_backend.cpp \
+	$(SRC_DIR)/filesystem_caps.cpp \
+	$(SRC_DIR)/filesystem_inspector.cpp \
 	$(SRC_DIR)/shebang.cpp \
 	$(SRC_DIR)/emulation.cpp \
 	$(SRC_DIR)/compat_blacklist.cpp \
@@ -593,6 +597,7 @@ LLVM_PROFDATA ?= llvm-profdata
 DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp tests/injection_action_stub.cpp
 DOCTEST_HARNESS_SRCS := \
 	src/archive_report.cpp \
+	src/filesystem_caps.cpp \
 	src/compat_blacklist.cpp \
 	src/meta.cpp \
 	src/injections.cpp \

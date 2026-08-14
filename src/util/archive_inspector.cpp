@@ -74,9 +74,7 @@ void inspectMetadata(struct archive_entry* entry, const std::string& path,
                      archiveinfo::ArchiveReport& report) {
   const int access = archive_entry_acl_count(entry, ARCHIVE_ENTRY_ACL_TYPE_ACCESS);
   const int defaults = archive_entry_acl_count(entry, ARCHIVE_ENTRY_ACL_TYPE_DEFAULT);
-  const int nfs4 = archive_entry_acl_count(entry, ARCHIVE_ENTRY_ACL_TYPE_NFS4);
-  if (access > 3 || defaults > 0 || nfs4 > 0)
-    addExample(report.acls, path);
+  if (access > 3 || defaults > 0) addExample(report.acls, path);
 
   const int xattrs = archive_entry_xattr_count(entry);
   if (xattrs > 0) {
