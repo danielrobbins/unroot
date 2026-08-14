@@ -259,6 +259,13 @@ void EnterConfig::resolveEnvironment() {
             [&](const auto& value) { return value.first == key; });
     };
 
+    if (!hasKey("TERM")) {
+        const char* term = ::getenv("TERM");
+        if (term && *term) {
+            envVars.emplace_back("TERM", std::string(term));
+        }
+    }
+
     if (!persistEnvNames.empty()) {
         for (const auto& name : persistEnvNames) {
             if (name.empty() || hasKey(name)) continue;

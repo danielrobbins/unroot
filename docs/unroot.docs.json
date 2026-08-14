@@ -133,7 +133,7 @@
       "title": "Environment",
       "short_help": "Environment",
       "syntax": "",
-      "description": "The target command does not inherit the host environment by default. Unroot supplies only a deterministic target `PATH`, which can be replaced along with any other value using repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.\n\nUse `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--persist-env` selections still apply. A bare command cannot be resolved when `PATH` is absent or empty, so use an absolute command in a deliberately pathless environment.",
+      "description": "The target command does not inherit the host environment by default. Unroot supplies a deterministic target `PATH` and, when it is set on the host, preserves `TERM` automatically so interactive terminal programs keep a usable terminal type. `PATH` can be replaced, and any other value can be added, with repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.\n\nUse `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--persist-env` selections still apply. A bare command cannot be resolved when `PATH` is absent or empty, so use an absolute command in a deliberately pathless environment.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "20"
@@ -418,7 +418,7 @@
       "title": "Feature selection",
       "short_help": "Feature selection",
       "syntax": "",
-      "description": "`UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.\n\nRooted mode enables `devpts`, `shm`, `run`, and `mtab` by default. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.\n\nBind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow `nobody` identity, and namespace root does not gain host-root access. The `/proc` mount point itself may similarly display overflow ownership because of its kernel-provided root inode; namespaced process entries such as `/proc/self/status` still report the mapped process identity.\n\nFor example, this disables the private shared-memory mount and enables the full device bind:\n\n```console\n$ UNROOT_FEATURES=-shm,+devbind unroot enter ~/rootfs\n```",
+      "description": "`UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.\n\nRooted mode enables `sys`, `devpts`, `shm`, `run`, and `mtab` by default. `/sys` is a recursive read-only bind of the host sysfs so topology and hardware-discovery tools can inspect the running machine without gaining a writable control surface. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.\n\nBind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow `nobody` identity, and namespace root does not gain host-root access. The `/proc` mount point itself may similarly display overflow ownership because of its kernel-provided root inode; namespaced process entries such as `/proc/self/status` still report the mapped process identity.\n\nFor example, this disables the private shared-memory mount and enables the full device bind:\n\n```console\n$ UNROOT_FEATURES=-shm,+devbind unroot enter ~/rootfs\n```",
       "metadata": {
         "parent": "section:mount-features",
         "priority": "0"
@@ -434,6 +434,18 @@
       "metadata": {
         "parent": "section:mount-features",
         "priority": "20"
+      }
+    },
+    "feature:sys": {
+      "kind": "feature",
+      "name": "sys",
+      "title": "sys",
+      "short_help": "sys",
+      "syntax": "sys",
+      "description": "Bind the host `/sys` into *ROOT* as a recursive read-only mount.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "25"
       }
     },
     "feature:shm": {
@@ -761,6 +773,10 @@
         },
         {
           "tag": "feature:devpts",
+          "children": []
+        },
+        {
+          "tag": "feature:sys",
           "children": []
         },
         {

@@ -203,6 +203,37 @@ def test_enter_single_has_usable_procfs(
     assert result.stdout == "proc-ok"
 
 
+def test_enter_single_has_readonly_sysfs_and_inherited_term(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-sysfs", busybox)
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        'test -d /sys/devices/system/cpu && '
+        'mount_line="$(/bin/busybox grep " /sys " /proc/mounts)" && '
+        'case "$mount_line" in *" ro,"*|*" ro "*) : ;; *) exit 1 ;; esac && '
+        'printf "%s" "$TERM"',
+        env={"TERM": "xterm-256color"},
+    ).assert_ok()
+
+    assert result.stdout == "xterm-256color"
+
+
 def test_enter_single_does_not_inject_host_network_files(
     unroot: UnrootRunner,
     tmp_path: Path,

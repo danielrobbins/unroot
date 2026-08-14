@@ -220,10 +220,11 @@ unroot enter ~/rootfs \
     -- make
 ```
 
-Unroot supplies a conventional target-side `PATH` but does not inherit the
-host environment. Use `--persist-env` to copy selected host variables,
-`--env` to set explicit values, or `--no-default-env` when even the built-in
-`PATH` should be omitted.
+Unroot supplies a conventional target-side `PATH` and automatically preserves
+the host `TERM` when it is set, so interactive terminal programs usually work
+immediately after entry. Use `--persist-env` to copy additional selected host
+variables, `--env` to set explicit values, or `--no-default-env` when even the
+built-in `PATH` should be omitted.
 
 Enter a single-owner rootfs without subordinate IDs:
 
@@ -405,6 +406,11 @@ remains active for the current boot.
 
 There is no resident daemon or container image format. unroot provides the
 appropriate path for the environment in front of you.
+
+For usability, rooted entry also binds the host `/sys` into the namespace as a
+read-only tree. Programs such as `lscpu`, `htop`, and build tools that inspect
+CPU topology can therefore see the running machine's sysfs data without gaining
+writable access to kernel control files.
 
 ## A Tool That Respects Your Intelligence ⭐
 

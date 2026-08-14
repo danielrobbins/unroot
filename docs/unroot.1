@@ -208,7 +208,7 @@ Scripts are supported. For architecture detection, \fBunroot\fR follows the scri
 If no command is supplied, \fBenter\fR runs \fB/bin/sh\fR\&.
 .SS Environment
 .PP
-The target command does not inherit the host environment by default. Unroot supplies only a deterministic target \fBPATH\fR, which can be replaced along with any other value using repeatable \fB\-\-env KEY=VALUE\fR options:
+The target command does not inherit the host environment by default. Unroot supplies a deterministic target \fBPATH\fR and, when it is set on the host, preserves \fBTERM\fR automatically so interactive terminal programs keep a usable terminal type. \fBPATH\fR can be replaced, and any other value can be added, with repeatable \fB\-\-env KEY=VALUE\fR options:
 .RS 4
 .nf
 $ unroot enter \(ti/rootfs \-\-env PATH=/bin:/usr/bin \-\- make
@@ -331,7 +331,7 @@ Print the Unroot version.
 .PP
 \fBUNROOT_FEATURES\fR adjusts filesystem setup with a comma\-separated list of feature names. Prefix a name with \fB\-\fR to disable it or \fB+\fR to enable it. \fB\-*\fR disables all optional features before later tokens are applied.
 .PP
-Rooted mode enables \fBdevpts\fR, \fBshm\fR, \fBrun\fR, and \fBmtab\fR by default. \fB/proc\fR is always mounted privately and cannot be disabled. \fBdevbind\fR is disabled by default.
+Rooted mode enables \fBsys\fR, \fBdevpts\fR, \fBshm\fR, \fBrun\fR, and \fBmtab\fR by default. \fB/sys\fR is a recursive read\-only bind of the host sysfs so topology and hardware\-discovery tools can inspect the running machine without gaining a writable control surface. \fB/proc\fR is always mounted privately and cannot be disabled. \fBdevbind\fR is disabled by default.
 .PP
 Bind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow \fBnobody\fR identity, and namespace root does not gain host\-root access. The \fB/proc\fR mount point itself may similarly display overflow ownership because of its kernel\-provided root inode; namespaced process entries such as \fB/proc/self/status\fR still report the mapped process identity.
 .PP
@@ -344,6 +344,9 @@ $ UNROOT_FEATURES=\-shm,+devbind unroot enter \(ti/rootfs
 .TP
 \fBdevpts\fR
 Mount a private \fB/dev/pts\fR for pseudo\-terminal support.
+.TP
+\fBsys\fR
+Bind the host \fB/sys\fR into \fIROOT\fR as a recursive read\-only mount.
 .TP
 \fBshm\fR
 Mount a private \fBtmpfs\fR at \fB/dev/shm\fR\&.

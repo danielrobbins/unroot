@@ -198,7 +198,7 @@ If no command is supplied, `enter` runs `/bin/sh`.
 
 ### Environment
 
-The target command does not inherit the host environment by default. Unroot supplies only a deterministic target `PATH`, which can be replaced along with any other value using repeatable `--env KEY=VALUE` options:
+The target command does not inherit the host environment by default. Unroot supplies a deterministic target `PATH` and, when it is set on the host, preserves `TERM` automatically so interactive terminal programs keep a usable terminal type. `PATH` can be replaced, and any other value can be added, with repeatable `--env KEY=VALUE` options:
 
 ```console
 $ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make
@@ -340,7 +340,7 @@ Print the Unroot version.
 
 `UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.
 
-Rooted mode enables `devpts`, `shm`, `run`, and `mtab` by default. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.
+Rooted mode enables `sys`, `devpts`, `shm`, `run`, and `mtab` by default. `/sys` is a recursive read-only bind of the host sysfs so topology and hardware-discovery tools can inspect the running machine without gaining a writable control surface. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.
 
 Bind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow `nobody` identity, and namespace root does not gain host-root access. The `/proc` mount point itself may similarly display overflow ownership because of its kernel-provided root inode; namespaced process entries such as `/proc/self/status` still report the mapped process identity.
 
@@ -353,6 +353,10 @@ $ UNROOT_FEATURES=-shm,+devbind unroot enter ~/rootfs
 ### devpts
 
 Mount a private `/dev/pts` for pseudo-terminal support.
+
+### sys
+
+Bind the host `/sys` into *ROOT* as a recursive read-only mount.
 
 ### shm
 

@@ -114,7 +114,7 @@ public:
   }
   static const std::vector<std::string>& known() {
   static std::vector<std::string> v{
-  "devbind","proc",
+  "devbind","sys","proc",
   "devpts","shm","run","mtab"
   };
     return v;
@@ -167,6 +167,7 @@ private:
 
 struct NsOptions {
   bool bindDev = true;
+  bool bindSys = true;
   bool mountProc = true;
   bool mountDevpts = true;
   bool mountTmpfsShm = true;
@@ -178,6 +179,7 @@ struct NsOptions {
 static NsOptions defaultOptionsAllTrue() {
   NsOptions o;
   o.bindDev = true;
+  o.bindSys = true;
   o.mountProc = true;
   o.mountDevpts = true;
   o.mountTmpfsShm = true;
@@ -192,6 +194,7 @@ static NsOptions resolveOptionsFromEnv(bool hostVisible = false) {
   FeatureSet fs(hostVisible);
   fs.parseEnv();
   o.bindDev = fs.has("devbind");
+  o.bindSys = fs.has("sys");
   // proc is always-on regardless of env toggles
   o.mountProc = true;
   o.mountDevpts = fs.has("devpts");
@@ -314,7 +317,13 @@ static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
                              step.c_str(), false, "minimal dev");
     }
   }
-  // Leave /sys alone by default; do not prebind /proc.
+  if (opt.bindSys) {
+    if (!bindRootfsTarget(root, "/sys", "/sys", true, true, true,
+                          "bind:/sys", false,
+                          "readonly host sysfs visibility"))
+      return false;
+  }
+  // Do not prebind /proc.
   return true;
 }
 
