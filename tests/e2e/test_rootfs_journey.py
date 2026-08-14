@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import stat
 import sys
 from pathlib import Path
@@ -10,7 +9,7 @@ from typing import Callable, Optional
 
 import pytest
 
-from .support import UnrootRunner, run_command
+from .support import UnrootRunner, rich_idmap_available
 
 
 pytestmark = [
@@ -38,17 +37,8 @@ def test_alpine_rootfs_can_be_unpacked_entered_modified_packed_and_restored(
         f"{role.lower()} rootfs archive and architecture are not configured",
         "rootfs_journey",
     )
-    helper = unroot.binary.with_name("unroot-util")
-    allocation = (
-        run_command([str(helper), "idmap", "--count", "65535"])
-        if helper.is_file() and os.access(helper, os.X_OK)
-        else None
-    )
     require_capability(
-        shutil.which("newuidmap") is not None
-        and shutil.which("newgidmap") is not None
-        and allocation is not None
-        and allocation.returncode == 0,
+        rich_idmap_available(unroot),
         "the real-rootfs journey requires rich ID mapping",
         "rootfs_journey",
     )

@@ -14,12 +14,15 @@ pytestmark = pytest.mark.skipif(
 def _run_helper(
     helper: Path, arguments: list[str], descriptor: int, cwd: Path
 ) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment["LC_ALL"] = "C"
     return subprocess.run(
         [
             str(helper), "archive", arguments[0], "--fd", str(descriptor),
             *arguments[1:],
         ],
         cwd=cwd,
+        env=environment,
         pass_fds=(descriptor,),
         check=False,
         text=True,
@@ -36,6 +39,9 @@ def test_archive_helper_packs_sparse_tree(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
     (source / "payload").write_text("payload\n", encoding="utf-8")
+    (source / "NetLock_Arany_Fotanúsítvány").write_text(
+        "utf-8 pathname\n", encoding="utf-8"
+    )
     with (source / "sparse").open("wb") as sparse:
         sparse.seek(1024 * 1024)
         sparse.write(b"x")
@@ -58,5 +64,5 @@ def test_archive_helper_packs_sparse_tree(tmp_path: Path) -> None:
     protocol, report = inspected.stdout.split(" ", 1)
     assert protocol == "unroot-archive-v1"
     contents = json.loads(report)
-    assert contents["members"] == 3
+    assert contents["members"] == 4
     assert contents["metadata"]["sparse_files"]["count"] == 1

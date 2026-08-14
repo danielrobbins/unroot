@@ -7,6 +7,7 @@
 #include "../build/version.hpp"
 
 #include <charconv>
+#include <clocale>
 #include <climits>
 #include <iostream>
 #include <string>
@@ -29,6 +30,8 @@ bool parseId(const char* text, unsigned int& value) {
 }
 
 int archiveCommand(int argc, char** argv) {
+    if (!std::setlocale(LC_CTYPE, "C.UTF-8"))
+        std::setlocale(LC_CTYPE, "C.utf8");
     if (argc == 3 && std::string(argv[2]) == "--version") {
         const std::string version = util::archiveLibraryVersion();
         if (version.empty()) {

@@ -61,6 +61,15 @@ SHA-256 checksums before pytest starts. Release cells require the
 `rootfs_journey` capability; ordinary local runs skip either role whose fixture
 is not configured.
 
+The separate `Funtoo Heritage Qualification` workflow runs weekly and on
+manual dispatch. It pins the final Raspberry Pi 4 and SiFive Freedom U740
+Funtoo stage3 archives by exact URL and SHA-256 checksum, then qualifies an
+x86-64 host entering ARM64 and RISC-V roots. Each journey verifies the stage's
+toolchain identity, `/proc`, pseudo-terminal allocation, DNS configuration,
+target-native compilation and execution, non-root ownership, and a complete
+pack and restore cycle. These larger historical fixtures complement the fast
+Alpine matrix without adding nearly one gigabyte of downloads to every push.
+
 The harness removes inherited `UNROOT_*` settings, supplies a deliberately
 failing `UNROOT_SUDO` helper, captures stdout and stderr, and kills the complete
 subprocess group on timeout. An E2E regression must therefore fail rather than
