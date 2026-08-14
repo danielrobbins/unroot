@@ -33,6 +33,10 @@ unroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 sudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot pack ROOT ARCHIVE
+unroot inject list ROOT [--json]
+unroot inject add ROOT ITEM [ITEM...]
+unroot inject remove ROOT ITEM [ITEM...]
+unroot inject clear ROOT
 unroot inspect host [--json]
 unroot inspect archive ARCHIVE [--json]
 ```
@@ -91,9 +95,11 @@ Unroot currently supports raw root filesystem tar archives. Filesystem entries s
 
 Both forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. With no `--id-count`, its recorded count is reused; an explicitly conflicting mode or count is rejected.
 
+After extraction, `unpack` installs writable copies of the host's `/etc/hosts` and `/etc/resolv.conf` by default. Their portable rootfs originals are preserved for later restoration and packing. See *ROOTFS INJECTIONS* for the complete lifecycle and for `--inject` controls that disable either or both defaults.
+
 `unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.
 
-Only one archive operation may use a rootfs at a time. `pack` and `unpack` take an exclusive operating-system lock on the pinned root directory and fail immediately when another archive operation is active. Process exit automatically releases the lock, with no lock file to become stale.
+Only one `pack`, `unpack`, or `inject` operation may manage a rootfs at a time. These actions take an exclusive operating-system lock on the pinned root directory and fail immediately when another rootfs-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. `enter` does not mutate the injection registry and does not require this lock.
 
 `pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:
 
@@ -120,6 +126,63 @@ Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty
 $ unroot inspect host
 $ unroot inspect archive stage3.tar.xz --json
 ```
+
+## ROOTFS INJECTIONS
+
+### Defaults and lifecycle
+
+`unroot unpack` installs two named injections after creating a managed rootfs: `hosts` copies the host's `/etc/hosts`, and `resolv.conf` copies the host's `/etc/resolv.conf`. The copies are ordinary writable mode-`0644` regular files owned by root inside the rootfs, not bind mounts. This gives a newly unpacked environment working host and DNS configuration without making those files immutable or exposing host inode ownership.
+
+Before replacing a destination, Unroot preserves its original regular file, symlink, or absence under `ROOT/.unroot/injections/`. That original is captured once. Re-adding an existing injection refreshes the live copy while retaining the same preserved original. Injections remain in place across any number of `enter` commands; `enter` neither applies nor restores them.
+
+Disable defaults while creating a rootfs with a subtractive `--inject` value. A comma-separated value may disable several names, and `-*` disables all current defaults:
+
+```console
+$ unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs
+$ unroot unpack --inject=-hosts,-resolv.conf stage3.tar.xz ~/rootfs
+$ unroot unpack --inject=-* stage3.tar.xz ~/rootfs
+```
+
+`unpack --inject` accepts exclusions only. This keeps rootfs creation predictable; add or alter injections afterward with the `inject` action.
+
+### Inspecting and managing injections
+
+The `inject` action operates only on managed root filesystems created by `unroot unpack`; it does not modify unmanaged trees used with `enter --single` or `enter --native`.
+
+List the registered injections in a rootfs, optionally as JSON:
+
+```console
+$ unroot inject list ~/rootfs
+$ unroot inject list ~/rootfs --json
+```
+
+Add or refresh either built-in by name:
+
+```console
+$ unroot inject add ~/rootfs hosts resolv.conf
+```
+
+Custom items use `SOURCE[:DESTINATION[:UID:GID:MODE]]`. With no destination, the same absolute path is used inside *ROOT*. Ownership defaults to `0:0` and mode to `0644`; overridden IDs are IDs inside the rootfs, and mode is octal:
+
+```console
+$ unroot inject add ~/rootfs /etc/localtime
+$ unroot inject add ~/rootfs /host/config:/etc/example/config:0:0:0600
+```
+
+The source may be a regular file or a symlink that resolves to one. Directories and special files are rejected. The destination parent must already exist. The destination itself may be a regular file, a symlink, or absent; the live injected node is always a regular file. Host source paths are supplied by the current command and are not stored in the rootfs registry.
+
+Remove registrations by built-in name or absolute destination. Removal restores the preserved regular file or symlink, or removes the live copy when the destination was originally absent. `clear` does this for every registration:
+
+```console
+$ unroot inject remove ~/rootfs hosts /etc/example/config
+$ unroot inject clear ~/rootfs
+```
+
+### Packing and concurrency
+
+`unroot pack` does not alter the live rootfs. While creating the archive, it excludes each live injected file and substitutes the preserved original at that path. If the path was originally absent, it remains absent from the archive. Host DNS, host names, and custom injected content therefore do not leak into a portable rootfs archive.
+
+The injection registry and preserved originals are private Unroot metadata and are excluded from archives. `pack`, `unpack`, and every `inject` operation share one rootfs lock. File installation and replacement are atomic, while ordinary concurrent `enter` operations only observe the current durable files and never perform competing injection cleanup.
 
 ## EXECUTION MODEL
 
@@ -167,7 +230,7 @@ Rich ownership requires suitable subordinate-ID allocations and the `unroot-util
 
 ### Filesystem setup
 
-Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `MOUNT FEATURES`. Both rich and native entry retain private mount and PID namespaces.
+Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `FILESYSTEM SETUP`. Both rich and native entry retain private mount and PID namespaces. *ROOT* must be a distinct root filesystem; `enter` rejects any path that resolves to the host `/`.
 
 `--map` bind-mounts an absolute host path at the same absolute path inside the root filesystem. `--map-ro` accepts either *SOURCE* for the same-path shorthand or *SOURCE:DESTINATION* for an explicit destination, and requires the resulting bind mount to be read-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to `enter`.
 
@@ -195,7 +258,7 @@ Rich roots and rooted `--single` use a user namespace, so namespace root capabil
 
 Every mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.
 
-Explicit bind mappings and selected resolver or device resources remain backed by host resources. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.
+Explicit bind mappings and device resources remain backed by host resources. Managed resolver and hosts injections are copied from trusted host files and remain ordinary writable rootfs files while active. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.
 
 ## --map-ro SOURCE[:DESTINATION]
 
@@ -239,6 +302,10 @@ Do not supply Unroot's deterministic target `PATH`. Explicit `--env` and `--pers
 
 Bind an absolute host path at the same path inside *ROOT*. May be repeated.
 
+### --inject EXCLUSIONS
+
+Disable one or more default injections during `unpack`. Accepts `-hosts`, `-resolv.conf`, a comma-separated combination, or `-*` for all defaults. Use the equals form, such as `--inject=-hosts` or `--inject=-hosts,-resolv.conf`, so a negative value is not mistaken for an option. May be repeated. Positive and custom injection specifications belong to `unroot inject add`.
+
 ### --emulation MODE
 
 Set the foreign-execution policy. `auto`, the default, uses a static QEMU user-mode emulator when the target ELF architecture differs from the host. `never` rejects a foreign target instead.
@@ -267,27 +334,21 @@ $ unroot --debug enter ~/rootfs -- /bin/true
 
 Print the Unroot version.
 
-## MOUNT FEATURES
+## FILESYSTEM SETUP
 
 ### Feature selection
 
 `UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.
 
-Rooted mode enables `resolvconf`, `hosts`, `devpts`, `shm`, `run`, and `mtab` by default. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.
+Rooted mode enables `devpts`, `shm`, `run`, and `mtab` by default. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.
 
-For example, this disables resolver sharing and enables the full device bind:
+Bind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow `nobody` identity, and namespace root does not gain host-root access. The `/proc` mount point itself may similarly display overflow ownership because of its kernel-provided root inode; namespaced process entries such as `/proc/self/status` still report the mapped process identity.
+
+For example, this disables the private shared-memory mount and enables the full device bind:
 
 ```console
-$ UNROOT_FEATURES=-resolvconf,+devbind unroot enter ~/rootfs
+$ UNROOT_FEATURES=-shm,+devbind unroot enter ~/rootfs
 ```
-
-### resolvconf
-
-Bind the host `/etc/resolv.conf` into the root filesystem.
-
-### hosts
-
-Bind the host `/etc/hosts` into the root filesystem.
 
 ### devpts
 
@@ -333,11 +394,13 @@ Private foreign execution additionally requires Linux 6.7 or newer and a compati
 
 Archive inspection, `pack`, and `unpack` require a libarchive-enabled `unroot-util` installed beside `unroot`. Distribution packages provide the matching host library dependency. Source builds report archive support as unavailable when libarchive development files were absent while building the helper.
 
+Adding, removing, or clearing injections also requires the sibling `unroot-util`; it performs mapped file installation and restoration under the ownership policy selected by the static engine. Listing the registry does not modify the rootfs.
+
 ## FILES
 
 ### ROOT/.unroot/meta.json
 
-Authoritative per-rootfs ownership and execution metadata maintained by `unroot`. Unmanaged `enter --native` does not create it.
+Authoritative per-rootfs ownership and execution metadata maintained by `unroot`. Unmanaged `enter --single` and `enter --native` do not create it.
 
 ### ROOT/.unroot/meta.lock
 
@@ -346,6 +409,10 @@ Coordination lock used while a managed root filesystem is initialized.
 ### ROOT/.unroot/bin/
 
 Versioned wrapper and emulator staging paths used by private rich-mode foreign execution.
+
+### ROOT/.unroot/injections/
+
+Private registry and preserved originals for durable rootfs injections. This tree is never included directly in a packed rootfs; `pack` substitutes each preserved original at its portable path.
 
 ### /etc/subuid, /etc/subgid
 

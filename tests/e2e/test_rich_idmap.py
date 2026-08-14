@@ -270,7 +270,7 @@ def test_rich_archive_round_trip_preserves_logical_ownership(
     root = tmp_path / "root"
     _require_mapping(
         unroot.run(
-            "unpack", str(archive), str(root)
+            "unpack", "--inject=-*", str(archive), str(root)
         ),
         require_capability,
     )
@@ -286,7 +286,7 @@ def test_rich_archive_round_trip_preserves_logical_ownership(
         assert member.gid == 2
     restored = tmp_path / "restored"
     unroot.run(
-        "unpack", str(captured), str(restored)
+        "unpack", "--inject=-*", str(captured), str(restored)
     ).assert_ok()
     status = (restored / "owned").stat()
     assert status.st_uid == uid_start

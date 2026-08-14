@@ -131,6 +131,7 @@ UTIL_SOURCES := \
 	$(SRC_DIR)/util/archive_fd.cpp \
 	$(SRC_DIR)/util/archive_engine.cpp \
 	$(SRC_DIR)/util/archive_inspector.cpp \
+	$(SRC_DIR)/util/rootfs.cpp \
 	$(SRC_DIR)/util/subid_backend.cpp
 UTIL_BUILD_DIR := $(BUILD_DIR)/unroot-util/subid-$(UTIL_HAVE_LIBSUBID)-archive-$(UTIL_HAVE_LIBARCHIVE)
 UTIL_OBJECTS := $(addprefix $(UTIL_BUILD_DIR)/,$(UTIL_SOURCES:.cpp=.o))
@@ -161,6 +162,7 @@ CPP_SOURCES := \
 	$(SRC_DIR)/linuxns.cpp \
 	$(SRC_DIR)/binfmt.cpp \
 	$(SRC_DIR)/meta.cpp \
+	$(SRC_DIR)/injections.cpp \
 	$(SRC_DIR)/archive_report.cpp \
 	$(SRC_DIR)/archive_input.cpp \
 	$(SRC_DIR)/archive_inspector.cpp \
@@ -175,6 +177,8 @@ CPP_SOURCES := \
 	$(SRC_DIR)/actions/config_base.cpp \
 	$(SRC_DIR)/actions/archive_config.cpp \
 	$(SRC_DIR)/actions/archive_action.cpp \
+	$(SRC_DIR)/actions/injection_config.cpp \
+	$(SRC_DIR)/actions/injection_action.cpp \
 	$(SRC_DIR)/actions/inspect_config.cpp \
 	$(SRC_DIR)/actions/inspect_action.cpp \
 	$(SRC_DIR)/actions/enter_config.cpp \
@@ -330,7 +334,7 @@ doctest-coverage:
 	  clang++ -Wall -Wextra -O0 -g -std=c++17 -fprofile-instr-generate -fcoverage-mapping -DUNROOT_ENABLE_DOCTEST \
 	    -Isrc -Isrc/include -Ithird_party/doctest \
 	    tests/doctest_main.cpp tests/dt_compat_blacklist.cpp tests/dt_option_parser.cpp tests/dt_option_parser_trailing.cpp tests/dt_action_trailing_negative.cpp tests/dt_enter_config_trailing.cpp tests/dt_enter_config_integration.cpp tests/dt_enter_config_idmap.cpp tests/dt_util_path.cpp tests/dt_util_subid.cpp tests/dt_error_map.cpp tests/dt_app_exit.cpp tests/dt_arch.cpp tests/dt_arch_errors.cpp tests/dt_exception_handler.cpp tests/enter_action_stub.cpp \
-	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
+	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/injections.cpp src/util/rootfs.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
 	    -o bin/unroot-tests-doctest-cov -pthread || { echo "[doctest-cov] clang build failed; falling back to GCC"; false; }; \
 	  echo "[doctest-cov] Running doctest harness"; \
 	  LLVM_PROFILE_FILE=coverage/doctest/coverage-%p.profraw bin/unroot-tests-doctest-cov || true; \
@@ -349,7 +353,7 @@ doctest-coverage:
 	  find . -name '*.gcda' -o -name '*.gcno' -o -name '*.gcov' -delete 2>/dev/null || true; \
 	  g++ -Wall -Wextra -O0 -g -std=c++17 --coverage -DUNROOT_ENABLE_DOCTEST -Isrc -Isrc/include -Ithird_party/doctest \
 	    tests/doctest_main.cpp tests/dt_compat_blacklist.cpp tests/dt_option_parser.cpp tests/dt_option_parser_trailing.cpp tests/dt_action_trailing_negative.cpp tests/dt_enter_config_trailing.cpp tests/dt_enter_config_integration.cpp tests/dt_enter_config_idmap.cpp tests/dt_util_path.cpp tests/dt_util_subid.cpp tests/dt_error_map.cpp tests/dt_app_exit.cpp tests/dt_arch.cpp tests/dt_arch_errors.cpp tests/dt_exception_handler.cpp tests/enter_action_stub.cpp \
-	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
+	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/injections.cpp src/util/rootfs.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
 	    -o bin/unroot-tests-doctest-cov -pthread; \
 	  echo "[doctest-cov] Running doctest harness (GCC)"; \
 	  ./bin/unroot-tests-doctest-cov || true; \
@@ -586,15 +590,17 @@ LLVM_PROFDATA ?= llvm-profdata
 # (Removed legacy Catch2 harness variables and targets.)
 
 ## Doctest harness build (all doctest-based unit tests)
-DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp
+DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp tests/injection_action_stub.cpp
 DOCTEST_HARNESS_SRCS := \
 	src/archive_report.cpp \
 	src/compat_blacklist.cpp \
 	src/meta.cpp \
+	src/injections.cpp \
 	src/binfmt.cpp \
 	src/hostcaps.cpp \
 	src/actions/config_base.cpp \
 	src/actions/archive_config.cpp \
+	src/actions/injection_config.cpp \
 	src/actions/enter_config.cpp \
 	src/actions/unified_action_registry.cpp \
 	src/actions/parsed_args.cpp \

@@ -50,11 +50,17 @@ bool acceptWarning(struct archive* object, int status, bool force,
   return true;
 }
 
-bool excluded(const char* name) {
-  if (!name) return false;
+std::string normalized(const char* name) {
+  if (!name) return {};
   std::string path(name);
   while (path.rfind("./", 0) == 0) path.erase(0, 2);
-  return path == ".unroot" || path.rfind(".unroot/", 0) == 0;
+  return path;
+}
+
+bool excluded(const char* name, const std::vector<std::string>& excludes) {
+  const std::string path = normalized(name);
+  return path == ".unroot" || path.rfind(".unroot/", 0) == 0 ||
+         std::find(excludes.begin(), excludes.end(), path) != excludes.end();
 }
 
 bool writeData(struct archive* destination, const void* data, size_t size,
@@ -97,6 +103,80 @@ int copyData(struct archive* source, struct archive* destination,
   return status == ARCHIVE_EOF ? 0 : archiveFailure(source, message);
 }
 
+using FileId = std::pair<la_int64_t, la_int64_t>;
+using FileLinks = std::map<FileId, std::string>;
+
+bool writeEntry(struct archive* disk, struct archive* writer,
+                struct archive_entry* entry, const std::string& name,
+                FileLinks& links, bool force, std::string& message) {
+  archive_entry_set_pathname(entry, name.c_str());
+  if (archive_entry_filetype(entry) != AE_IFREG)
+    archive_entry_set_size(entry, 0);
+  else if (archive_entry_nlink(entry) > 1) {
+    const FileId id{archive_entry_dev(entry), archive_entry_ino64(entry)};
+    auto [found, inserted] = links.emplace(id, name);
+    if (!inserted) {
+      archive_entry_set_hardlink(entry, found->second.c_str());
+      archive_entry_set_size(entry, 0);
+    }
+  }
+  return acceptWarning(writer, archive_write_header(writer, entry), force,
+                       message) &&
+         (archive_entry_size(entry) == 0 ||
+          copyData(disk, writer, message) == 0);
+}
+
+bool validRelativePath(const std::string& path) {
+  if (path.empty() || path.front() == '/') return false;
+  size_t start = 0;
+  while (start <= path.size()) {
+    const size_t end = path.find('/', start);
+    const std::string component = path.substr(
+        start, (end == std::string::npos ? path.size() : end) - start);
+    if (component.empty() || component == "." || component == "..")
+      return false;
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  return true;
+}
+
+bool writeSubstitution(
+    struct archive* writer,
+    const archiveio::Substitution& substitution, FileLinks& links,
+    bool force, std::string& message) {
+  if (!validRelativePath(substitution.source) ||
+      !validRelativePath(substitution.destination)) {
+    message = "invalid archive substitution path";
+    return false;
+  }
+  ArchiveReader disk(archive_read_disk_new(), archive_read_free);
+  ArchiveEntry entry(archive_entry_new(), archive_entry_free);
+  if (!disk || !entry) {
+    message = "unable to allocate archive substitution reader";
+    return false;
+  }
+  archive_read_disk_set_symlink_physical(disk.get());
+  archive_read_disk_set_behavior(disk.get(), ARCHIVE_READDISK_RESTORE_ATIME);
+  if (archive_read_disk_open(disk.get(), substitution.source.c_str()) !=
+      ARCHIVE_OK) {
+    archiveFailure(disk.get(), message);
+    return false;
+  }
+  const int status = archive_read_next_header2(disk.get(), entry.get());
+  if (!acceptWarning(disk.get(), status, force, message) ||
+      status == ARCHIVE_EOF ||
+      !writeEntry(disk.get(), writer, entry.get(), substitution.destination,
+                  links, force, message)) {
+    if (status == ARCHIVE_EOF && message.empty())
+      message = "archive substitution source is missing";
+    archive_read_close(disk.get());
+    return false;
+  }
+  archive_read_close(disk.get());
+  return true;
+}
+
 }  // namespace
 
 int unpackArchive(int descriptor, bool force, std::string& message) {
@@ -135,7 +215,10 @@ int unpackArchive(int descriptor, bool force, std::string& message) {
   return 0;
 }
 
-int packArchive(int descriptor, const std::string& filter, bool force,
+int packArchive(int descriptor, const std::string& filter,
+                const std::vector<std::string>& excludes,
+                const std::vector<archiveio::Substitution>& substitutions,
+                bool force,
                 std::string& message) {
   UniqueFd output =
       reopenArchiveDescriptor(descriptor, O_WRONLY | O_TRUNC, message);
@@ -158,8 +241,7 @@ int packArchive(int descriptor, const std::string& filter, bool force,
     return archiveFailure(disk.get(), message);
   }
 
-  using FileId = std::pair<la_int64_t, la_int64_t>;
-  std::map<FileId, std::string> links;
+  FileLinks links;
   ArchiveEntry entry(archive_entry_new(), archive_entry_free);
   int status;
   while ((status = archive_read_next_header2(disk.get(), entry.get())) !=
@@ -171,32 +253,27 @@ int packArchive(int descriptor, const std::string& filter, bool force,
       return 1;
     }
     const char* name = archive_entry_pathname(entry.get());
-    if (excluded(name)) {
+    if (excluded(name, excludes)) {
       archive_entry_clear(entry.get());
       continue;
     }
     if (archive_read_disk_can_descend(disk.get()))
       archive_read_disk_descend(disk.get());
-    if (archive_entry_filetype(entry.get()) != AE_IFREG)
-      archive_entry_set_size(entry.get(), 0);
-    else if (archive_entry_nlink(entry.get()) > 1) {
-      const FileId id{archive_entry_dev(entry.get()), archive_entry_ino64(entry.get())};
-      auto [found, inserted] = links.emplace(id, name ? name : "");
-      if (!inserted) {
-        archive_entry_set_hardlink(entry.get(), found->second.c_str());
-        archive_entry_set_size(entry.get(), 0);
-      }
-    }
-    if (!acceptWarning(writer.get(), archive_write_header(writer.get(), entry.get()),
-                       force, message) ||
-        (archive_entry_size(entry.get()) > 0 &&
-         copyData(disk.get(), writer.get(), message) != 0)) {
+    if (!writeEntry(disk.get(), writer.get(), entry.get(),
+                    name ? name : "", links, force, message)) {
       if (message.empty()) archiveFailure(writer.get(), message);
       archive_read_close(disk.get());
       archive_write_close(writer.get());
       return 1;
     }
     archive_entry_clear(entry.get());
+  }
+  for (const auto& substitution : substitutions) {
+    if (!writeSubstitution(writer.get(), substitution, links, force, message)) {
+      archive_read_close(disk.get());
+      archive_write_close(writer.get());
+      return 1;
+    }
   }
   const int closeStatus = archive_write_close(writer.get());
   if (!acceptWarning(writer.get(), closeStatus, force, message)) {
@@ -215,7 +292,9 @@ int unpackArchive(int, bool, std::string& message) {
   return 1;
 }
 
-int packArchive(int, const std::string&, bool, std::string& message) {
+int packArchive(int, const std::string&, const std::vector<std::string>&,
+                const std::vector<archiveio::Substitution>&, bool,
+                std::string& message) {
   message = "archive creation requires libarchive support";
   return 1;
 }

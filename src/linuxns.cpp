@@ -114,7 +114,7 @@ public:
   }
   static const std::vector<std::string>& known() {
   static std::vector<std::string> v{
-  "devbind","resolvconf","hosts","proc",
+  "devbind","proc",
   "devpts","shm","run","mtab"
   };
     return v;
@@ -167,8 +167,6 @@ private:
 
 struct NsOptions {
   bool bindDev = true;
-  bool bindResolvConf = true;
-  bool bindHosts = true;
   bool mountProc = true;
   bool mountDevpts = true;
   bool mountTmpfsShm = true;
@@ -180,8 +178,6 @@ struct NsOptions {
 static NsOptions defaultOptionsAllTrue() {
   NsOptions o;
   o.bindDev = true;
-  o.bindResolvConf = true;
-  o.bindHosts = true;
   o.mountProc = true;
   o.mountDevpts = true;
   o.mountTmpfsShm = true;
@@ -196,8 +192,6 @@ static NsOptions resolveOptionsFromEnv(bool hostVisible = false) {
   FeatureSet fs(hostVisible);
   fs.parseEnv();
   o.bindDev = fs.has("devbind");
-  o.bindResolvConf = fs.has("resolvconf");
-  o.bindHosts = fs.has("hosts");
   // proc is always-on regardless of env toggles
   o.mountProc = true;
   o.mountDevpts = fs.has("devpts");
@@ -269,9 +263,9 @@ static bool bindRootfsTarget(const util::Rootfs& root, const char* src,
   return protectedMount;
 }
 
-static bool setupPreChrootBinds(const util::Rootfs& root,
-                                const NsOptions& opt, const EmuPlan* emu,
-                                const std::vector<BindMap>* maps) {
+static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
+                        const EmuPlan* emu,
+                        const std::vector<BindMap>* maps) {
   // Optional emulator bind (for cross-arch without binfmt): host file -> /tmp/unroot/<name> in rootfs
   if (emu && !emu->source.empty() && !emu->target.empty()) {
     std::string note = std::string("static emulator: src=") + emu->source +
@@ -320,16 +314,7 @@ static bool setupPreChrootBinds(const util::Rootfs& root,
                              step.c_str(), false, "minimal dev");
     }
   }
-  // Leave /sys alone by default; do not prebind /proc
-  // Host network config files
-  if (opt.bindResolvConf)
-    (void)bindRootfsTarget(root, "/etc/resolv.conf", "/etc/resolv.conf", false,
-                           false, true, "bind:/etc/resolv.conf", false,
-                           "non-fatal network config");
-  if (opt.bindHosts)
-    (void)bindRootfsTarget(root, "/etc/hosts", "/etc/hosts", false, false,
-                           true, "bind:/etc/hosts", false,
-                           "non-fatal network config");
+  // Leave /sys alone by default; do not prebind /proc.
   return true;
 }
 
@@ -484,7 +469,7 @@ SetupResult setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* 
     
     if (!rootfs.empty()) {
         util::Rootfs root(rootfs);
-        if (!root || !setupPreChrootBinds(root, opts, emu, maps))
+        if (!root || root.isHostRoot() || !setupRootfs(root, opts, emu, maps))
             return {105, errno};
         if (::fchdir(root.fd()) != 0 || ::chroot(".") != 0 ||
             ::chdir("/") != 0) return {105, errno};

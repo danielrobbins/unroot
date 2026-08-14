@@ -243,6 +243,30 @@ bool Rootfs::copyHostFileAtomic(const std::string& source,
                  mode);
 }
 
+bool Rootfs::copyFileAtomic(int source, const std::string& destination,
+                            uid_t uid, gid_t gid, mode_t mode) const {
+  std::string leaf;
+  UniqueFd dir = parent(destination, false, leaf);
+  if (!dir || ::lseek(source, 0, SEEK_SET) < 0) return false;
+
+  std::string temporaryName;
+  UniqueFd output = temporary(dir.get(), leaf, mode, temporaryName);
+  if (!output) return false;
+  char buffer[65536];
+  ssize_t count;
+  bool copied = true;
+  while (copied && (count = ::read(source, buffer, sizeof(buffer))) > 0)
+    copied = util::write_all(output.get(), buffer, static_cast<size_t>(count));
+  if (count < 0) copied = false;
+  return replace(dir.get(), temporaryName, leaf, std::move(output), copied,
+                 mode, uid, gid);
+}
+
+bool Rootfs::parentDirectoryExists(const std::string& path) const {
+  std::string leaf;
+  return static_cast<bool>(parent(path, false, leaf));
+}
+
 UniqueFd Rootfs::temporary(int parentFd, const std::string& leaf, mode_t mode,
                            std::string& name) const {
   UniqueFd output;
@@ -259,7 +283,9 @@ UniqueFd Rootfs::temporary(int parentFd, const std::string& leaf, mode_t mode,
 
 bool Rootfs::replace(int parentFd, const std::string& temporary,
                      const std::string& destination, UniqueFd output,
-                     bool ready, mode_t mode) {
+                     bool ready, mode_t mode, uid_t uid, gid_t gid) {
+  if (ready && uid != static_cast<uid_t>(-1))
+    ready = output && ::fchown(output.get(), uid, gid) == 0;
   if (ready) ready = output && ::fchmod(output.get(), mode) == 0;
   output.reset();
   if (ready)
@@ -277,10 +303,48 @@ bool Rootfs::linkHostFile(const std::string& source,
                     0;
 }
 
+bool Rootfs::move(const std::string& source,
+                  const std::string& destination) const {
+  std::string sourceLeaf;
+  std::string destinationLeaf;
+  UniqueFd sourceParent = parent(source, false, sourceLeaf);
+  UniqueFd destinationParent = parent(destination, true, destinationLeaf);
+  return sourceParent && destinationParent &&
+         ::renameat(sourceParent.get(), sourceLeaf.c_str(),
+                    destinationParent.get(), destinationLeaf.c_str()) == 0;
+}
+
+bool Rootfs::remove(const std::string& path) const {
+  std::string leaf;
+  UniqueFd dir = parent(path, false, leaf);
+  return dir && ::unlinkat(dir.get(), leaf.c_str(), 0) == 0;
+}
+
+bool Rootfs::touch(const std::string& path, mode_t mode) const {
+  return static_cast<bool>(file(path, O_WRONLY | O_CREAT | O_EXCL, mode, true));
+}
+
+bool Rootfs::lstat(const std::string& path, struct stat& result) const {
+  std::string leaf;
+  UniqueFd dir = parent(path, false, leaf);
+  return dir &&
+         ::fstatat(dir.get(), leaf.c_str(), &result, AT_SYMLINK_NOFOLLOW) == 0;
+}
+
 bool Rootfs::stat(const std::string& path, struct stat& result) const {
   UniqueFd target = file(path, O_PATH);
   return target && ::fstat(target.get(), &result) == 0 &&
          !S_ISLNK(result.st_mode);
+}
+
+bool Rootfs::isHostRoot() const {
+  UniqueFd host(::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
+  struct stat candidateInfo {};
+  struct stat hostInfo {};
+  return root_ && host && ::fstat(root_.get(), &candidateInfo) == 0 &&
+         ::fstat(host.get(), &hostInfo) == 0 &&
+         candidateInfo.st_dev == hostInfo.st_dev &&
+         candidateInfo.st_ino == hostInfo.st_ino;
 }
 
 std::string Rootfs::fdPath(int fd) {

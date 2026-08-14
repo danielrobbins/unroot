@@ -7,7 +7,8 @@ integration:
   inspection, namespace creation, mounts, emulation, and process execution.
 - `unroot-util` is dynamically linked and provides narrowly defined services
   whose correct behavior depends on the host runtime: account-provider
-  lookups and libarchive-backed inspection, packing, and extraction.
+  lookups, libarchive-backed inspection and transport, and mapped atomic file
+  operations used by the injection registry.
 
 Single-ID rootfs entry and same-architecture native execution use only the
 static engine. Managed rich roots use `unroot-util` for subordinate-ID
@@ -66,6 +67,14 @@ FD`. The helper accepts only the inherited descriptor, scans headers through
 libarchive, and returns objective archive facts. It never receives an
 archive-controlled host pathname.
 
+Injection operations follow the same descriptor-first boundary. The engine
+opens and pins the host source file, chooses the rootfs destination, ownership,
+mode, ID map, and preservation paths, then passes the inherited source
+descriptor to `unroot-util`. The helper runs inside the selected ownership
+namespace with the pinned root as its working directory. It performs only the
+requested rooted, atomic file replacement or restoration; it never discovers
+host sources or chooses injection policy.
+
 For `archive pack` and `archive unpack`, the static engine first owns all
 policy: root pinning and locking, archive inspection, ID-map selection,
 namespace creation, overwrite rules, and atomic output publication. It then
@@ -79,19 +88,19 @@ descriptor.
 ## Scope Discipline
 
 The helper is not a second application layer and must not become a general
-command runner. Provider operations belong there only when they:
+command runner. Host-provider operations belong there only when they:
 
-1. needs the host's dynamic runtime or provider configuration;
+1. need the host's dynamic runtime or provider configuration;
 2. can be completed before entering a namespace;
 3. do not inspect or mutate the target root filesystem; and
 4. leave namespace, mount, privilege, and child-lifecycle policy in `unroot`.
 
-Archive traversal is the deliberate second profile. It belongs in the helper
-because libarchive is a host-runtime dependency, but it may run only after the
-engine has fixed every policy input. It receives descriptors and operation
-flags, uses the current working directory selected by the engine, and reports
-warnings or failure. It must not select roots, mappings, namespaces,
-overwrite policy, or publication policy.
+Archive traversal and mapped injection file operations form the deliberate
+second profile. They may run only after the engine has fixed every policy
+input. They receive descriptors and operation flags, use the current working
+directory selected by the engine, and report warnings or failure. They must
+not select roots, mappings, namespaces, overwrite policy, injection sources,
+or publication policy.
 
 This gives future host-integration problems a clean outlet without weakening
 the static engine's portability or scattering provider-specific conditionals

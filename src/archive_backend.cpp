@@ -71,12 +71,21 @@ Backend::Backend() : helper_(util::siblingHostHelper()) {
 
 int Backend::create(const fs::path& root, const util::IdMapPlan& idmap,
                     int outputDescriptor, const fs::path& destination,
+                    const injections::ArchivePlan& injections,
                     bool force) const {
   UniqueFd output = childDescriptor(outputDescriptor);
   if (!output) return -1;
   std::vector<std::string> arguments{
       helper_, "archive", "pack", "--fd", std::to_string(output.get()),
       "--filter", compressionFilter(destination)};
+  for (const auto& path : injections.excludes) {
+    arguments.push_back("--exclude");
+    arguments.push_back(path);
+  }
+  for (const auto& item : injections.substitutions) {
+    arguments.push_back("--substitute");
+    arguments.push_back(item.source + "=" + item.destination);
+  }
   if (force) arguments.push_back("--force");
   return run(root, idmap, std::move(arguments));
 }

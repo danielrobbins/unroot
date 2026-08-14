@@ -40,6 +40,10 @@ unroot enter ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 unroot enter \-\-single ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 sudo unroot enter \-\-native ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 unroot pack ROOT ARCHIVE
+unroot inject list ROOT [\-\-json]
+unroot inject add ROOT ITEM [ITEM...]
+unroot inject remove ROOT ITEM [ITEM...]
+unroot inject clear ROOT
 unroot inspect host [\-\-json]
 unroot inspect archive ARCHIVE [\-\-json]
 .fi
@@ -102,9 +106,11 @@ Unroot currently supports raw root filesystem tar archives. Filesystem entries s
 .PP
 Both forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to \fBROOT/.unroot/meta.json\fR\&. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. With no \fB\-\-id\-count\fR, its recorded count is reused; an explicitly conflicting mode or count is rejected.
 .PP
+After extraction, \fBunpack\fR installs writable copies of the host's \fB/etc/hosts\fR and \fB/etc/resolv.conf\fR by default. Their portable rootfs originals are preserved for later restoration and packing. See \fIROOTFS INJECTIONS\fR for the complete lifecycle and for \fB\-\-inject\fR controls that disable either or both defaults.
+.PP
 \fBunroot pack\fR requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling \fBunroot\-util\fR linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with \fIROOT\fR as its working directory, but is not chrooted, so no shell or archive tool is required inside \fIROOT\fR\&. Destination suffixes select compression filters such as \fB\&.gz\fR, \fB\&.xz\fR, and \fB\&.zst\fR when supported by the host libarchive.
 .PP
-Only one archive operation may use a rootfs at a time. \fBpack\fR and \fBunpack\fR take an exclusive operating\-system lock on the pinned root directory and fail immediately when another archive operation is active. Process exit automatically releases the lock, with no lock file to become stale.
+Only one \fBpack\fR, \fBunpack\fR, or \fBinject\fR operation may manage a rootfs at a time. These actions take an exclusive operating\-system lock on the pinned root directory and fail immediately when another rootfs\-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. \fBenter\fR does not mutate the injection registry and does not require this lock.
 .PP
 \fBpack\fR records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host\-root\-owned copy of a rich rootfs:
 .RS 4
@@ -132,6 +138,64 @@ $ unroot inspect host
 $ unroot inspect archive stage3.tar.xz \-\-json
 .fi
 .RE
+.SH ROOTFS INJECTIONS
+.SS Defaults and lifecycle
+.PP
+\fBunroot unpack\fR installs two named injections after creating a managed rootfs: \fBhosts\fR copies the host's \fB/etc/hosts\fR, and \fBresolv.conf\fR copies the host's \fB/etc/resolv.conf\fR\&. The copies are ordinary writable mode\-\fB0644\fR regular files owned by root inside the rootfs, not bind mounts. This gives a newly unpacked environment working host and DNS configuration without making those files immutable or exposing host inode ownership.
+.PP
+Before replacing a destination, Unroot preserves its original regular file, symlink, or absence under \fBROOT/.unroot/injections/\fR\&. That original is captured once. Re\-adding an existing injection refreshes the live copy while retaining the same preserved original. Injections remain in place across any number of \fBenter\fR commands; \fBenter\fR neither applies nor restores them.
+.PP
+Disable defaults while creating a rootfs with a subtractive \fB\-\-inject\fR value. A comma\-separated value may disable several names, and \fB\-*\fR disables all current defaults:
+.RS 4
+.nf
+$ unroot unpack \-\-inject=\-hosts stage3.tar.xz \(ti/rootfs
+$ unroot unpack \-\-inject=\-hosts,\-resolv.conf stage3.tar.xz \(ti/rootfs
+$ unroot unpack \-\-inject=\-* stage3.tar.xz \(ti/rootfs
+.fi
+.RE
+.PP
+\fBunpack \-\-inject\fR accepts exclusions only. This keeps rootfs creation predictable; add or alter injections afterward with the \fBinject\fR action.
+.SS Inspecting and managing injections
+.PP
+The \fBinject\fR action operates only on managed root filesystems created by \fBunroot unpack\fR; it does not modify unmanaged trees used with \fBenter \-\-single\fR or \fBenter \-\-native\fR\&.
+.PP
+List the registered injections in a rootfs, optionally as JSON:
+.RS 4
+.nf
+$ unroot inject list \(ti/rootfs
+$ unroot inject list \(ti/rootfs \-\-json
+.fi
+.RE
+.PP
+Add or refresh either built\-in by name:
+.RS 4
+.nf
+$ unroot inject add \(ti/rootfs hosts resolv.conf
+.fi
+.RE
+.PP
+Custom items use \fBSOURCE[:DESTINATION[:UID:GID:MODE]]\fR\&. With no destination, the same absolute path is used inside \fIROOT\fR\&. Ownership defaults to \fB0:0\fR and mode to \fB0644\fR; overridden IDs are IDs inside the rootfs, and mode is octal:
+.RS 4
+.nf
+$ unroot inject add \(ti/rootfs /etc/localtime
+$ unroot inject add \(ti/rootfs /host/config:/etc/example/config:0:0:0600
+.fi
+.RE
+.PP
+The source may be a regular file or a symlink that resolves to one. Directories and special files are rejected. The destination parent must already exist. The destination itself may be a regular file, a symlink, or absent; the live injected node is always a regular file. Host source paths are supplied by the current command and are not stored in the rootfs registry.
+.PP
+Remove registrations by built\-in name or absolute destination. Removal restores the preserved regular file or symlink, or removes the live copy when the destination was originally absent. \fBclear\fR does this for every registration:
+.RS 4
+.nf
+$ unroot inject remove \(ti/rootfs hosts /etc/example/config
+$ unroot inject clear \(ti/rootfs
+.fi
+.RE
+.SS Packing and concurrency
+.PP
+\fBunroot pack\fR does not alter the live rootfs. While creating the archive, it excludes each live injected file and substitutes the preserved original at that path. If the path was originally absent, it remains absent from the archive. Host DNS, host names, and custom injected content therefore do not leak into a portable rootfs archive.
+.PP
+The injection registry and preserved originals are private Unroot metadata and are excluded from archives. \fBpack\fR, \fBunpack\fR, and every \fBinject\fR operation share one rootfs lock. File installation and replacement are atomic, while ordinary concurrent \fBenter\fR operations only observe the current durable files and never perform competing injection cleanup.
 .SH EXECUTION MODEL
 .SS Command selection
 .PP
@@ -178,7 +242,7 @@ An existing rootfs with no metadata is not guessed. Use \fBunroot enter \-\-sing
 Rich ownership requires suitable subordinate\-ID allocations and the \fBunroot\-util\fR, \fBnewuidmap\fR, and \fBnewgidmap\fR helpers. \fBunroot\-util\fR must be installed beside \fBunroot\fR\&. When built with libsubid, it uses the host's configured subordinate\-ID provider; otherwise it reads \fB/etc/subuid\fR and \fB/etc/subgid\fR directly. Each rich root requires one contiguous subordinate UID range and one contiguous subordinate GID range at least as large as its selected ID count.
 .SS Filesystem setup
 .PP
-Rooted entry prepares a private mount tree, enters \fIROOT\fR with \fBchroot(2)\fR, mounts a private \fB/proc\fR, and performs the enabled minimal filesystem setup described under \fBMOUNT FEATURES\fR\&. Both rich and native entry retain private mount and PID namespaces.
+Rooted entry prepares a private mount tree, enters \fIROOT\fR with \fBchroot(2)\fR, mounts a private \fB/proc\fR, and performs the enabled minimal filesystem setup described under \fBFILESYSTEM SETUP\fR\&. Both rich and native entry retain private mount and PID namespaces. \fIROOT\fR must be a distinct root filesystem; \fBenter\fR rejects any path that resolves to the host \fB/\fR\&.
 .PP
 \fB\-\-map\fR bind\-mounts an absolute host path at the same absolute path inside the root filesystem. \fB\-\-map\-ro\fR accepts either \fISOURCE\fR for the same\-path shorthand or \fISOURCE:DESTINATION\fR for an explicit destination, and requires the resulting bind mount to be read\-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to \fBenter\fR\&.
 .SS Foreign\-architecture execution
@@ -204,7 +268,7 @@ Rich roots and rooted \fB\-\-single\fR use a user namespace, so namespace root c
 .PP
 Every mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.
 .PP
-Explicit bind mappings and selected resolver or device resources remain backed by host resources. \fBUNROOT_FEATURES=+devbind\fR exposes the complete host \fB/dev\fR tree and should be enabled only when that access is intended.
+Explicit bind mappings and device resources remain backed by host resources. Managed resolver and hosts injections are copied from trusted host files and remain ordinary writable rootfs files while active. \fBUNROOT_FEATURES=+devbind\fR exposes the complete host \fB/dev\fR tree and should be enabled only when that access is intended.
 .TP
 \fB\-\-map\-ro SOURCE[:DESTINATION]\fR
 Bind an absolute host path inside \fIROOT\fR, then make that mount and any nested mounts read\-only. With no destination, the source is mounted at the same absolute path. May be repeated.
@@ -237,6 +301,9 @@ Do not supply Unroot's deterministic target \fBPATH\fR\&. Explicit \fB\-\-env\fR
 \fB\-\-map PATH\fR
 Bind an absolute host path at the same path inside \fIROOT\fR\&. May be repeated.
 .TP
+\fB\-\-inject EXCLUSIONS\fR
+Disable one or more default injections during \fBunpack\fR\&. Accepts \fB\-hosts\fR, \fB\-resolv.conf\fR, a comma\-separated combination, or \fB\-*\fR for all defaults. Use the equals form, such as \fB\-\-inject=\-hosts\fR or \fB\-\-inject=\-hosts,\-resolv.conf\fR, so a negative value is not mistaken for an option. May be repeated. Positive and custom injection specifications belong to \fBunroot inject add\fR\&.
+.TP
 \fB\-\-emulation MODE\fR
 Set the foreign\-execution policy. \fBauto\fR, the default, uses a static QEMU user\-mode emulator when the target ELF architecture differs from the host. \fBnever\fR rejects a foreign target instead.
 .TP
@@ -259,25 +326,21 @@ $ unroot \-\-debug enter \(ti/rootfs \-\- /bin/true
 .TP
 \fB\-\-version, \-V\fR
 Print the Unroot version.
-.SH MOUNT FEATURES
+.SH FILESYSTEM SETUP
 .SS Feature selection
 .PP
 \fBUNROOT_FEATURES\fR adjusts filesystem setup with a comma\-separated list of feature names. Prefix a name with \fB\-\fR to disable it or \fB+\fR to enable it. \fB\-*\fR disables all optional features before later tokens are applied.
 .PP
-Rooted mode enables \fBresolvconf\fR, \fBhosts\fR, \fBdevpts\fR, \fBshm\fR, \fBrun\fR, and \fBmtab\fR by default. \fB/proc\fR is always mounted privately and cannot be disabled. \fBdevbind\fR is disabled by default.
+Rooted mode enables \fBdevpts\fR, \fBshm\fR, \fBrun\fR, and \fBmtab\fR by default. \fB/proc\fR is always mounted privately and cannot be disabled. \fBdevbind\fR is disabled by default.
 .PP
-For example, this disables resolver sharing and enables the full device bind:
+Bind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow \fBnobody\fR identity, and namespace root does not gain host\-root access. The \fB/proc\fR mount point itself may similarly display overflow ownership because of its kernel\-provided root inode; namespaced process entries such as \fB/proc/self/status\fR still report the mapped process identity.
+.PP
+For example, this disables the private shared\-memory mount and enables the full device bind:
 .RS 4
 .nf
-$ UNROOT_FEATURES=\-resolvconf,+devbind unroot enter \(ti/rootfs
+$ UNROOT_FEATURES=\-shm,+devbind unroot enter \(ti/rootfs
 .fi
 .RE
-.TP
-\fBresolvconf\fR
-Bind the host \fB/etc/resolv.conf\fR into the root filesystem.
-.TP
-\fBhosts\fR
-Bind the host \fB/etc/hosts\fR into the root filesystem.
 .TP
 \fBdevpts\fR
 Mount a private \fB/dev/pts\fR for pseudo\-terminal support.
@@ -314,16 +377,21 @@ Native ownership requires host root privileges and Linux mount and PID namespace
 Private foreign execution additionally requires Linux 6.7 or newer and a compatible static \fBqemu\-*\-static\fR user emulator. Native foreign execution requires host \fBbinfmt_misc\fR and a trusted static QEMU when no compatible handler is already registered.
 .PP
 Archive inspection, \fBpack\fR, and \fBunpack\fR require a libarchive\-enabled \fBunroot\-util\fR installed beside \fBunroot\fR\&. Distribution packages provide the matching host library dependency. Source builds report archive support as unavailable when libarchive development files were absent while building the helper.
+.PP
+Adding, removing, or clearing injections also requires the sibling \fBunroot\-util\fR; it performs mapped file installation and restoration under the ownership policy selected by the static engine. Listing the registry does not modify the rootfs.
 .SH FILES
 .TP
 \fBROOT/.unroot/meta.json\fR
-Authoritative per\-rootfs ownership and execution metadata maintained by \fBunroot\fR\&. Unmanaged \fBenter \-\-native\fR does not create it.
+Authoritative per\-rootfs ownership and execution metadata maintained by \fBunroot\fR\&. Unmanaged \fBenter \-\-single\fR and \fBenter \-\-native\fR do not create it.
 .TP
 \fBROOT/.unroot/meta.lock\fR
 Coordination lock used while a managed root filesystem is initialized.
 .TP
 \fBROOT/.unroot/bin/\fR
 Versioned wrapper and emulator staging paths used by private rich\-mode foreign execution.
+.TP
+\fBROOT/.unroot/injections/\fR
+Private registry and preserved originals for durable rootfs injections. This tree is never included directly in a packed rootfs; \fBpack\fR substitutes each preserved original at its portable path.
 .TP
 \fB/etc/subuid, /etc/subgid\fR
 Host allocations used for rich ownership when \fBunroot\-util\fR is built without libsubid support.

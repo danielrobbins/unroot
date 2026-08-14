@@ -14,6 +14,7 @@
 #include "archive_input.hpp"
 #include "archive_inspector.hpp"
 #include "meta.hpp"
+#include "injections.hpp"
 #include "util/archive_lock.hpp"
 #include "util/error_map.hpp"
 #include "util/fd.hpp"
@@ -149,10 +150,12 @@ int ArchiveAction::perform(const PackConfig& config) {
         "first");
   auto idmap = resolvedMap(pinnedRoot, stored.plan.mode,
                            util::subordinateIdCount(stored.plan), false);
+  auto injectionPlan = injections::archivePlan(pinnedRoot);
+  if (!injectionPlan) fail(injectionPlan.error);
 
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   const int result = backend.create(pinnedRoot, idmap, output.descriptor(),
-                                    archivePath, config.force);
+                                    archivePath, injectionPlan, config.force);
   if (result == -1) fail("unable to prepare archive output");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (result == 0) output.publish();
@@ -197,6 +200,13 @@ int ArchiveAction::perform(const UnpackConfig& config) {
       backend.extract(pinnedRoot, initialized.plan, input, config.force);
   if (result == -1) fail("unable to prepare archive for extraction");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
+  if (result == 0) {
+    std::string error;
+    if (!injections::add(
+            pinnedRoot.string(), initialized.plan,
+            injections::defaults(config.disabledInjections), error))
+      fail("injections: " + error);
+  }
   return result;
 }
 

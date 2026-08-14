@@ -31,7 +31,6 @@ TEST_CASE("EnterConfig integration: ROOT plus trailing command via --") {
     CHECK(cfg.envVars[0].second ==
         "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
 }
-
 TEST_CASE("EnterConfig environment precedence is explicit, persisted, default") {
     EnterConfig persisted;
     ToBeParsedArgs persistedArgs;
@@ -95,7 +94,7 @@ TEST_CASE("EnterConfig integration: ROOT is required") {
 TEST_CASE("EnterConfig accepts explicit foreign execution controls") {
     EnterConfig cfg;
     ToBeParsedArgs tpa;
-    tpa.args = {"/", "--qemu", "/usr/bin/qemu-aarch64-static",
+    tpa.args = {"/tmp", "--qemu", "/usr/bin/qemu-aarch64-static",
                 "--qemu-cpu", "max,sve=on,sve256=on", "--", "/bin/sh"};
     cfg.parse(tpa);
     cfg.validate();
@@ -112,7 +111,7 @@ TEST_CASE("EnterConfig validates the emulation policy") {
 
     EnterConfig disabled;
     ToBeParsedArgs never;
-    never.args = {"/", "--emulation", "never", "--", "/bin/sh"};
+    never.args = {"/tmp", "--emulation", "never", "--", "/bin/sh"};
     disabled.parse(never);
     disabled.validate();
     CHECK(disabled.emulationPolicy == emulation::Policy::Never);
@@ -121,7 +120,7 @@ TEST_CASE("EnterConfig validates the emulation policy") {
 TEST_CASE("EnterConfig rejects contradictory emulation controls") {
     EnterConfig cfg;
     ToBeParsedArgs tpa;
-    tpa.args = {"/", "--emulation", "never", "--qemu-cpu", "qemu64",
+    tpa.args = {"/tmp", "--emulation", "never", "--qemu-cpu", "qemu64",
                 "--", "/bin/sh"};
     cfg.parse(tpa);
     REQUIRE_THROWS_AS(cfg.validate(), AppException);

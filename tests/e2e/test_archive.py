@@ -326,7 +326,7 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
     _create_archive(source, original)
 
     root = tmp_path / "root"
-    result = unroot.run("unpack", str(original), str(root))
+    result = unroot.run("unpack", "--inject=-*", str(original), str(root))
     require_capability(
         result.returncode == 0,
         "archive round trip requires rich ID mapping:\n" + result.diagnostic(),
@@ -348,8 +348,232 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
     assert not any(name == ".unroot" or name.startswith("./.unroot") for name in members)
 
     restored = tmp_path / "restored"
-    unroot.run("unpack", str(captured), str(restored)).assert_ok()
+    unroot.run(
+        "unpack", "--inject=-*", str(captured), str(restored)
+    ).assert_ok()
     _assert_payload_tree(restored)
+
+
+def test_pack_restores_portable_network_configuration(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    busybox = find_static_busybox()
+    if busybox is None:
+        pytest.skip("a static BusyBox is required for native entry coverage")
+    source = create_rootfs(tmp_path / "source", busybox)
+    (source / "run").mkdir()
+    (source / "run" / "resolv.conf").write_text(
+        "nameserver 192.0.2.1\n", encoding="utf-8"
+    )
+    (source / "etc" / "resolv.conf").symlink_to("../run/resolv.conf")
+    input_archive = tmp_path / "input.tar"
+    _create_archive(source, input_archive)
+    root = tmp_path / "root"
+    _run_unroot(
+        unroot,
+        ["unpack", "--native", str(input_archive), str(root)],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    assert (root / "etc" / "resolv.conf").read_text(
+        encoding="utf-8"
+    ) == Path("/etc/resolv.conf").read_text(encoding="utf-8")
+    archive = tmp_path / "network-config.tar"
+
+    _run_unroot(
+        unroot, ["pack", str(root), str(archive)], {}, privileged_prefix
+    ).assert_ok()
+
+    with tarfile.open(archive) as packed:
+        members = {member.name.removeprefix("./"): member for member in packed}
+        assert "etc/resolv.conf" in members
+        assert "etc/hosts" not in members
+        assert members["etc/resolv.conf"].issym()
+        assert members["etc/resolv.conf"].linkname == "../run/resolv.conf"
+        resolver = packed.extractfile(members["run/resolv.conf"])
+        assert resolver is not None
+        assert resolver.read() == b"nameserver 192.0.2.1\n"
+
+
+def test_native_managed_root_supports_durable_custom_injection(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    busybox = find_static_busybox()
+    if busybox is None:
+        pytest.skip("a static BusyBox is required for native entry coverage")
+    source_root = create_rootfs(tmp_path / "source-root", busybox)
+    portable = source_root / "tmp" / "portable-config"
+    portable.write_text("portable\n", encoding="utf-8")
+    destination = source_root / "etc" / "custom.conf"
+    destination.symlink_to("../tmp/portable-config")
+    input_archive = tmp_path / "input.tar"
+    _create_archive(source_root, input_archive)
+    root = tmp_path / "root"
+    _run_unroot(
+        unroot,
+        ["unpack", "--native", str(input_archive), str(root)],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    host_source = tmp_path / "host-config"
+    host_source.write_text("injected\n", encoding="utf-8")
+    host_link = tmp_path / "host-link"
+    host_link.symlink_to(host_source.name)
+    spec = f"{host_link}:/etc/custom.conf:1:1:0600"
+
+    _run_unroot(
+        unroot,
+        ["inject", "add", str(root), spec],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    result = _run_unroot(
+        unroot,
+        [
+            "enter",
+            "--native",
+            str(root),
+            "--",
+            "/bin/busybox",
+            "sh",
+            "-c",
+            "stat -c %u:%g:%a /etc/custom.conf; cat /etc/custom.conf",
+        ],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    assert result.stdout == "1:1:600\ninjected\n"
+
+    archive = tmp_path / "custom-injection.tar"
+    _run_unroot(
+        unroot, ["pack", str(root), str(archive)], {}, privileged_prefix
+    ).assert_ok()
+    with tarfile.open(archive) as packed:
+        members = {member.name.removeprefix("./"): member for member in packed}
+        assert members["etc/custom.conf"].issym()
+        assert members["etc/custom.conf"].linkname == "../tmp/portable-config"
+
+    _run_unroot(
+        unroot,
+        ["inject", "remove", str(root), "/etc/custom.conf"],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    restored = root / "etc" / "custom.conf"
+    assert restored.is_symlink()
+    assert restored.readlink() == Path("../tmp/portable-config")
+
+
+def test_native_injection_rejects_fifo_source_without_blocking(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    source_root = create_rootfs(tmp_path / "source-root")
+    input_archive = tmp_path / "input.tar"
+    _create_archive(source_root, input_archive)
+    root = tmp_path / "root"
+    _run_unroot(
+        unroot,
+        ["unpack", "--native", str(input_archive), str(root)],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    source = tmp_path / "source.fifo"
+    os.mkfifo(source)
+
+    result = _run_unroot(
+        unroot,
+        ["inject", "add", str(root), f"{source}:/etc/custom.conf"],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "does not resolve to a regular file" in result.stderr
+
+
+def test_inject_clear_preflights_every_preserved_original(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    source_root = create_rootfs(tmp_path / "source-root")
+    input_archive = tmp_path / "input.tar"
+    _create_archive(source_root, input_archive)
+    root = tmp_path / "root"
+    _run_unroot(
+        unroot,
+        ["unpack", "--native", str(input_archive), str(root)],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    resolver_marker = (
+        root / ".unroot" / "injections" / "absent" / "etc" / "resolv.conf"
+    )
+    subprocess.run(
+        [*privileged_prefix, "rm", "--", str(resolver_marker)], check=True
+    )
+
+    result = _run_unroot(
+        unroot,
+        ["inject", "clear", str(root)],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "preserved original is missing for /etc/resolv.conf" in result.stderr
+    assert (root / "etc" / "hosts").read_text(
+        encoding="utf-8"
+    ) == Path("/etc/hosts").read_text(encoding="utf-8")
+
+
+def test_unpack_can_disable_default_injections(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    source = create_rootfs(tmp_path / "source")
+    (source / "etc" / "hosts").write_text(
+        "portable hosts\n", encoding="utf-8"
+    )
+    (source / "etc" / "resolv.conf").write_text(
+        "portable resolver\n", encoding="utf-8"
+    )
+    archive = tmp_path / "input.tar"
+    _create_archive(source, archive)
+    root = tmp_path / "root"
+
+    _run_unroot(
+        unroot,
+        ["unpack", "--native", "--inject=-*", str(archive), str(root)],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+
+    assert (root / "etc" / "hosts").read_text(
+        encoding="utf-8"
+    ) == "portable hosts\n"
+    assert (root / "etc" / "resolv.conf").read_text(
+        encoding="utf-8"
+    ) == "portable resolver\n"
+    listed = _run_unroot(
+        unroot,
+        ["inject", "list", str(root), "--json"],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    assert json.loads(listed.stdout)["entries"] == []
 
 
 def test_pack_requires_initialized_rootfs(
@@ -553,7 +777,7 @@ def test_unpack_does_not_require_tar_on_path(
     root = tmp_path / "root"
     empty_path = tmp_path / "empty-path"
     empty_path.mkdir()
-    arguments = ["unpack", "--native"]
+    arguments = ["unpack", "--native", "--inject=-*"]
     if force:
         arguments.append("--force")
     arguments.extend([str(archive), str(root)])
@@ -683,7 +907,7 @@ fi
     root = tmp_path / "root"
     process = _start_unroot(
         isolated,
-        ["unpack", "--native", str(archive), str(root)],
+        ["unpack", "--native", "--inject=-*", str(archive), str(root)],
         {},
         privileged_prefix,
     )

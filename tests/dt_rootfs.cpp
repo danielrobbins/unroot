@@ -133,3 +133,10 @@ TEST_CASE("Rootfs detects symlink loops") {
   CHECK_FALSE(root.resolvedFile("/first"));
   CHECK(errno == ELOOP);
 }
+
+TEST_CASE("Rootfs identifies the host root by inode") {
+  util::Rootfs root("/");
+
+  REQUIRE(root);
+  CHECK(root.isHostRoot());
+}

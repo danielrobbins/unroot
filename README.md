@@ -205,6 +205,12 @@ Enter a rootfs and start its default shell:
 unroot enter ~/rootfs
 ```
 
+`unroot unpack` also gives managed roots writable copies of the host's
+`/etc/resolv.conf` and `/etc/hosts`, so networking works without read-only bind
+mounts. Their portable originals are preserved for packing. See
+[Managing Rootfs Injections](#managing-rootfs-injections) when you need to
+inspect, disable, replace, or remove these files.
+
 Run a specific command with a clean environment:
 
 ```bash
@@ -304,7 +310,8 @@ record their ownership mode in `ROOT/.unroot/meta.json`.
 preserves ownership, permissions, timestamps, links, sparse files, POSIX ACLs,
 and extended attributes including file capabilities. SELinux labels are included
 when active. Compression is selected from the destination suffix (`.gz`, `.xz`,
-`.zst`).
+`.zst`). Registered injections are replaced by their preserved rootfs originals
+during capture.
 
 Archives contain the ownership visible inside the managed root, not its shifted
 host representation. This makes `pack` and `unpack` the safe way to copy a rootfs
@@ -324,6 +331,54 @@ Packing requires a managed rootfs. Unpacking requires an empty destination and
 never overlays an existing tree. Host-specific `.unroot` metadata is excluded
 from archives; incoming archives containing it are rejected. Unsafe archive
 paths and OCI image layouts are also rejected before extraction.
+
+`enter` always expects a distinct root filesystem and rejects any path that
+resolves to the host `/`. Use ordinary host execution when no root change is
+intended.
+
+## Managing Rootfs Injections
+
+Files copied from the host into a managed rootfs are called *injections*.
+`unpack` registers `hosts` and `resolv.conf` by default, preserving whatever was
+at each destination before installing a writable host copy. The registrations
+are durable: later `enter` commands simply use the current files.
+
+See what is registered:
+
+```bash
+unroot inject list ~/rootfs
+unroot inject list ~/rootfs --json
+```
+
+Remove one default and restore its original rootfs file, or add it again using
+fresh host content:
+
+```bash
+unroot inject remove ~/rootfs hosts
+unroot inject add ~/rootfs hosts
+```
+
+To create a rootfs without one or both defaults, subtract them at unpack time:
+
+```bash
+unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs
+unroot unpack --inject=-* stage3.tar.xz ~/rootfs
+```
+
+You can also register an explicitly authorized host file. This example installs
+a root-owned mode-`0600` copy at `/etc/example/config`:
+
+```bash
+unroot inject add ~/rootfs \
+    /host/config:/etc/example/config:0:0:0600
+```
+
+`unroot inject remove` restores the destination that was preserved when the
+registration was first added; `unroot inject clear` restores every registered
+destination. `pack` leaves the live rootfs unchanged but writes those preserved
+portable originals to the archive, so host-specific and custom injected content
+does not leak into the result. See [ROOTFS INJECTIONS](docs/unroot.md#rootfs-injections)
+for the complete file-type, ownership, and lifecycle contract.
 
 Use `unroot inspect archive ARCHIVE` to see the format, ownership range,
 layout, and extended metadata without extracting it. `unroot inspect host`
@@ -419,7 +474,7 @@ rich rootfs feature set.
 - Host `binfmt_misc` and a trusted static QEMU emulator for native foreign
   execution when no compatible handler is already present
 - A libarchive-enabled `unroot-util` beside `unroot` for archive inspection,
-  `pack`, and `unpack`
+  `pack`, `unpack`, and injection management
 - A C++17 compiler and GNU Make when building from source
 
 `make cli` produces a statically linked `bin/unroot` namespace engine and a

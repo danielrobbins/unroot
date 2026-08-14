@@ -28,9 +28,17 @@ class Rootfs {
   bool copyHostFileAtomic(const std::string& source,
                           const std::string& destination,
                           mode_t mode = 0755) const;
+  bool copyFileAtomic(int source, const std::string& destination,
+                      uid_t uid, gid_t gid, mode_t mode) const;
+  bool parentDirectoryExists(const std::string& path) const;
   bool linkHostFile(const std::string& source,
                     const std::string& destination) const;
+  bool move(const std::string& source, const std::string& destination) const;
+  bool remove(const std::string& path) const;
+  bool touch(const std::string& path, mode_t mode = 0600) const;
+  bool lstat(const std::string& path, struct stat& result) const;
   bool stat(const std::string& path, struct stat& result) const;
+  bool isHostRoot() const;
 
   static std::string fdPath(int fd);
 
@@ -41,7 +49,8 @@ class Rootfs {
                      std::string& name) const;
   static bool replace(int parent, const std::string& temporary,
                       const std::string& destination, UniqueFd output,
-                      bool ready, mode_t mode);
+                      bool ready, mode_t mode, uid_t uid = static_cast<uid_t>(-1),
+                      gid_t gid = static_cast<gid_t>(-1));
 
   UniqueFd root_;
 };

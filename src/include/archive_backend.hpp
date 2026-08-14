@@ -4,6 +4,7 @@
 #include <string>
 
 #include "archive_input.hpp"
+#include "injections.hpp"
 #include "util/idmap.hpp"
 
 namespace archive {
@@ -17,7 +18,8 @@ class Backend {
 
   int create(const std::filesystem::path& root,
              const util::IdMapPlan& idmap, int outputDescriptor,
-             const std::filesystem::path& destination, bool force) const;
+             const std::filesystem::path& destination,
+             const injections::ArchivePlan& injections, bool force) const;
   int extract(const std::filesystem::path& root,
               const util::IdMapPlan& idmap,
               const archiveio::Input& input, bool force) const;

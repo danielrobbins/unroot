@@ -31,6 +31,9 @@ exercised through the shipped Unroot executable. The suite verifies:
   changes, implicit map reuse, and refusal of stale or conflicting mappings;
 - exclusive archive-operation locking, automatic process-exit release, and
   root-path replacement detection;
+- default and custom injection registration, refresh, restoration, portable
+  archive substitution, all-target restoration preflight, nonblocking
+  special-source rejection, and destination type validation;
 - managed rich entry and privileged native ownership and entry;
 - working-directory and environment propagation;
 - rooted `PATH` command lookup;

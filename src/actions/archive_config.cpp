@@ -6,6 +6,7 @@
 
 #include "app_exception.hpp"
 #include "archive_action.hpp"
+#include "injections.hpp"
 #include "parsed_args.hpp"
 #include "unified_action_registry.hpp"
 #include "util/error_map.hpp"
@@ -79,6 +80,16 @@ void UnpackConfig::configure_parser() {
           [this](const std::string& value) {
             idCount = parseIdCount(value);
             idCountSpecified = true;
+          })
+      .add_multi_option_meta(
+          {"--inject"}, "<exclusions>",
+          "Disable default injections, for example -hosts,-resolv.conf or -*",
+          [this](const std::string& value) {
+            std::string error;
+            if (!injections::parseUnpackExclusions(
+                    value, disabledInjections, error))
+              throw AppException(
+                  util::make_error(util::LibErr::Invalid, 0, error), "usage");
           })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
       .add_positional_meta(

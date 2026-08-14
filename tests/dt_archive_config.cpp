@@ -129,6 +129,33 @@ TEST_CASE("unpack accepts explicit metadata-loss override") {
   CHECK(config.force);
 }
 
+TEST_CASE("unpack accepts subtractive default injection controls") {
+  ToBeParsedArgs args;
+  args.action_name = "unpack";
+  args.args = {"input.tar", "root", "--inject=-hosts,-resolv.conf"};
+  UnpackConfig config;
+  config.parse(args);
+  CHECK((config.disabledInjections ==
+         std::vector<std::string>{"hosts", "resolv.conf"}));
+
+  ToBeParsedArgs allArgs;
+  allArgs.action_name = "unpack";
+  allArgs.args = {"input.tar", "root", "--inject=-*"};
+  UnpackConfig all;
+  all.parse(allArgs);
+  CHECK(all.disabledInjections == std::vector<std::string>{"*"});
+}
+
+TEST_CASE("unpack directs positive injections to the inject action") {
+  for (const std::string value : {"hosts", "/host/file:/etc/file"}) {
+    ToBeParsedArgs args;
+    args.action_name = "unpack";
+    args.args = {"input.tar", "root", "--inject", value};
+    UnpackConfig config;
+    REQUIRE_THROWS_AS(config.parse(args), AppException);
+  }
+}
+
 TEST_CASE("unpack no longer exposes ownership-shape selection") {
   ToBeParsedArgs args;
   args.action_name = "unpack";
