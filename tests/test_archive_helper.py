@@ -31,7 +31,19 @@ def _run_helper(
     )
 
 
-def test_archive_helper_packs_sparse_tree(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("filter_name", "archive_name", "expected_filters"),
+    [
+        ("none", "output.tar", []),
+        ("xz", "output.tar.xz", ["xz"]),
+    ],
+)
+def test_archive_helper_packs_sparse_tree(
+    tmp_path: Path,
+    filter_name: str,
+    archive_name: str,
+    expected_filters: list[str],
+) -> None:
     root = Path(__file__).parents[1]
     helper = root / "bin" / "unroot-util"
     assert helper.is_file(), "build unroot-util before running helper tests"
@@ -46,11 +58,11 @@ def test_archive_helper_packs_sparse_tree(tmp_path: Path) -> None:
         sparse.seek(1024 * 1024)
         sparse.write(b"x")
 
-    archive = tmp_path / "output.tar"
+    archive = tmp_path / archive_name
     with archive.open("wb") as output:
         packed = _run_helper(
             helper,
-            ["pack", "--filter", "none"],
+            ["pack", "--filter", filter_name],
             output.fileno(),
             source,
         )
@@ -64,5 +76,6 @@ def test_archive_helper_packs_sparse_tree(tmp_path: Path) -> None:
     protocol, report = inspected.stdout.split(" ", 1)
     assert protocol == "unroot-archive-v1"
     contents = json.loads(report)
+    assert contents["filters"] == expected_filters
     assert contents["members"] == 4
     assert contents["metadata"]["sparse_files"]["count"] == 1

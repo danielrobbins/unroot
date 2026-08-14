@@ -141,6 +141,22 @@ bool validRelativePath(const std::string& path) {
   return true;
 }
 
+bool configureWriterFilter(struct archive* writer, const std::string& filter,
+                           std::string& message) {
+  if (filter.empty() || filter == "none") return true;
+  if (archive_write_add_filter_by_name(writer, filter.c_str()) != ARCHIVE_OK) {
+    archiveFailure(writer, message);
+    return false;
+  }
+  if (filter == "xz" &&
+      archive_write_set_filter_option(writer, "xz", "threads", "0") !=
+          ARCHIVE_OK) {
+    archiveFailure(writer, message);
+    return false;
+  }
+  return true;
+}
+
 bool writeSubstitution(
     struct archive* writer,
     const archiveio::Substitution& substitution, FileLinks& links,
@@ -230,9 +246,7 @@ int packArchive(int descriptor, const std::string& filter,
     return 1;
   }
   if (archive_write_set_format_pax(writer.get()) != ARCHIVE_OK ||
-      (!filter.empty() && filter != "none" &&
-       archive_write_add_filter_by_name(writer.get(), filter.c_str()) !=
-           ARCHIVE_OK) ||
+      !configureWriterFilter(writer.get(), filter, message) ||
       archive_write_open_fd(writer.get(), output.get()) != ARCHIVE_OK)
     return archiveFailure(writer.get(), message);
   archive_read_disk_set_symlink_physical(disk.get());

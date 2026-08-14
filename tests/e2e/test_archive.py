@@ -338,7 +338,7 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
     assert metadata["version"] == "unroot.meta/v1"
     assert metadata["idmap"]["mode"] == "rich"
 
-    captured = tmp_path / "captured.tar.gz"
+    captured = tmp_path / "captured.tar.xz"
     unroot.run("pack", str(root), str(captured)).assert_ok()
     members = subprocess.run(
         ["tar", "--list", f"--file={captured}"], check=True, text=True,
