@@ -1,18 +1,20 @@
 # Unroot 1.0.3
 
-**In Development**
+**Features Release** — August 13, 2026
 
-- `unroot unpack --id-count COUNT` can create rich roots with ownership
-  headroom beyond the default IDs 0–65535. The selected subordinate UID/GID
-  extents are persisted and revalidated on every later entry. Existing roots
-  remain unchanged, while older Unroot versions will reject new roots whose
-  recorded count exceeds their former limit.
-  ([#19](https://github.com/danielrobbins/unroot/issues/19))
-- `pack` and `unpack` now take one self-cleaning exclusive lock per rootfs, so
-  archive reads and writes cannot overlap on the same tree. A competing command
-  fails immediately, while process exit automatically releases ownership and
-  leaves no stale lock file.
-  ([#27](https://github.com/danielrobbins/unroot/issues/27))
+A number of improvements have been made to `unroot` to improve usability and make the tool more seamless in real-world use, as well as more robust. Many thanks to Zeno R. R. Davatz (@zdavatz) for extended testing and comprehensive issue reporting. Unroot would not be the same without community support and feedback!
+
+- `$TERM` is now preserved inside the rootfs by default which generally allows ncurses programs and colors to work seamlessly in the terminal after `unroot enter`.
+- `/sys` is recursively bind-mounted read-only into the rootfs by default, allowing tools such as `lscpu` and `htop` to function properly without exposing writable sysfs control files.
+- Unroot now uses `libarchive` through the sibling `unroot-util` host helper. This removes the dependency on a locally-installed GNU tar and eliminates a class of bugs.
+- Parallel `xz` compression is now supported and enabled by default via `libarchive`.
+- `unroot unpack --id-count COUNT` can create rich roots with ownership headroom beyond the default IDs 0–65535. ([#19](https://github.com/danielrobbins/unroot/issues/19))
+- New `inspect host` and `inspect archive <archive>` actions expose runtime capabilities and archive facts ([#21](https://github.com/danielrobbins/unroot/issues/21)).
+- `unroot unpack` will always do a single pre-flight scan of the to-be-unpacked archive; when it finds POSIX ACLs or extended attributes, `unpack` now performs a quick check for the corresponding support on the exact destination filesystem before extraction begins. If necessary features are not present, `unpack` aborts prior to extraction. This can be overridden with `--force`.
+- `/etc/resolv.conf` and `/etc/hosts` are now *injected* (safely copied) into managed (non-native) rootfs environments using the novel `inject` action. They were previously read-only bind-mounted so could not be altered. This new method allows local name resolution to work while allowing local edits to the files, and prevents local network configuration from leaking into packed rootfs tarballs. This also provides a framework for customizing other injectable files that you want inserted into the unpacked rootfs by default, but don't want to become part of the packed/distributed rootfs.
+- `pack` and `unpack` now take one self-cleaning exclusive lock per rootfs, so archive reads and writes cannot overlap on the same tree. A competing command fails immediately, while process exit automatically releases ownership and leaves no stale lock file. ([#27](https://github.com/danielrobbins/unroot/issues/27))
+- For now, OCI images are rejected until we add support. [#25](https://github.com/danielrobbins/unroot/issues/25))
+- `enter` rejects paths that resolve to the host `/`.
 
 # Unroot 1.0.2
 

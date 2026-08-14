@@ -39,9 +39,9 @@ You've downloaded an ARM64 Raspberry Pi rootfs archive, but you're sitting at
 a much faster x86-64 Ryzen workstation. Instead of cross-compiling or booting
 the Pi, enter the rootfs directly:
 
-```bash
-unroot unpack raspi4-rootfs.tar.xz ~/roots/raspi4
-unroot enter ~/roots/raspi4 -- /bin/sh
+```console
+$ unroot unpack raspi4-rootfs.tar.xz ~/roots/raspi4
+$ unroot enter ~/roots/raspi4 -- /bin/sh
 ```
 
 `unpack` preserves the rootfs's users, groups, permissions, capabilities, and
@@ -58,8 +58,8 @@ package manager, compiler, and tools as though you were running natively.
 
 When you're done, capture the modified system:
 
-```bash
-unroot pack ~/roots/raspi4 raspi4-modified.tar.zst
+```console
+$ unroot pack ~/roots/raspi4 raspi4-modified.tar.zst
 ```
 
 ### Use a 32-core x86-64 system as an ARM64 build machine
@@ -68,17 +68,16 @@ Say `/mnt/raspi4-root` is an NFS mount of a real Raspberry Pi root filesystem.
 You want to compile a large project using the target system's own compiler and
 libraries, but with the CPU and memory of your workstation:
 
-```bash
-sudo unroot enter --native /mnt/raspi4-root \
-    -- /bin/bash
+```console
+$ sudo unroot enter --native /mnt/raspi4-root -- /bin/bash
 ```
 
 Once inside, verify you're running in the ARM64 environment:
 
-```bash
-bash$ uname -a
+```console
+# uname -a
 Linux workstation 6.6.0 #1 SMP PREEMPT_DYNAMIC aarch64 GNU/Linux
-bash$ cat /etc/os-release
+# cat /etc/os-release
 NAME="Raspberry Pi OS"
 VERSION="12 (bookworm)"
 ```
@@ -89,9 +88,9 @@ But you can execute any command, use the Pi's package manager, and build softwar
 with the Pi's own toolchain, all while leveraging your workstation's 32 cores and
 memory. When you're ready to build:
 
-```bash
-bash$ cd /home/pi/src/large-project
-bash$ make -j32
+```console
+# cd /home/pi/src/large-project
+# make -j32
 ```
 
 Native mode keeps the mounted filesystem's existing ownership intact. unroot
@@ -107,8 +106,8 @@ written directly to the mounted rootfs.
 An unmanaged rootfs whose relevant files all belong to your account can use a
 single-ID mapping without subordinate UID or GID allocations:
 
-```bash
-unroot enter --single ~/roots/appliance -- /bin/sh
+```console
+$ unroot enter --single ~/roots/appliance -- /bin/sh
 ```
 
 Inside that rootfs, your host UID and GID appear as `0`. Other identities cannot
@@ -119,10 +118,8 @@ be represented, so this is deliberately not a fallback for a multi-user rootfs.
 You don't need a VM or container daemon just to run one program against a
 different userspace:
 
-```bash
-unroot enter ~/roots/debian-testing \
-    --map-ro "$PWD:/work" \
-    -- /usr/bin/python3 /work/check-release.py
+```console
+$ unroot enter ~/roots/debian-testing --map-ro "$PWD:/work" -- /usr/bin/python3 /work/check-release.py
 ```
 
 The process sees the selected rootfs as `/`, gets private mount and PID state,
@@ -201,53 +198,73 @@ operation never silently becomes native host-root execution.
 
 Enter a rootfs and start its default shell:
 
-```bash
-unroot enter ~/rootfs
+```console
+$ unroot unpack raspi4-rootfs.tar.xz ~/rootfs
 ```
 
-`unroot unpack` also gives managed roots writable copies of the host's
-`/etc/resolv.conf` and `/etc/hosts`, so networking works without read-only bind
-mounts. Their portable originals are preserved for packing. See
-[Managing Rootfs Injections](#managing-rootfs-injections) when you need to
-inspect, disable, replace, or remove these files.
+After unpacking, `unroot unpack` also copies in the host's
+`/etc/resolv.conf` and `/etc/hosts`, so DNS name resolution works as expected. 
+You can see what local files were injected into the rootfs as follows:
+
+```console
+$ unroot inject list ~/rootfs
+NAME            DESTINATION                 OWNER       MODE    ORIGINAL  CURRENT
+resolv.conf     /etc/resolv.conf            0:0         0644    regular   present
+hosts           /etc/hosts                  0:0         0644    absent    present
+```
+
+The originals they may have overwritten are safely preserved — they
+aren't lost, and you can restore them later if needed. When you pack the rootfs,
+these injected host-specific files are automatically excluded from the tarball,
+keeping the archive portable and independent of your particular host
+configuration. See [Managing Rootfs Injections](#managing-rootfs-injections) for
+more information related to inspecting, disabling, replacing, or removing these files.
+
+Now, you can enter the rootfs:
+
+```console
+$ unroot enter ~/rootfs
+#
+```
+
+You are now root inside the rootfs, which may even be using QEMU to emulate a
+foreign architecture if you are not currently running Linux arm-64bit.
 
 Run a specific command with a clean environment:
 
-```bash
-unroot enter ~/rootfs \
-    --cwd /build \
-    --env MAKEFLAGS=-j8 \
-    -- make
+```console
+$ unroot enter ~/rootfs --cwd /build --env MAKEFLAGS=-j8 -- make
 ```
 
 Unroot supplies a conventional target-side `PATH` and automatically preserves
 the host `TERM` when it is set, so interactive terminal programs usually work
 immediately after entry. Use `--persist-env` to copy additional selected host
 variables, `--env` to set explicit values, or `--no-default-env` when even the
-built-in `PATH` should be omitted.
+built-in `PATH` and `TERM` should be omitted.
 
 Enter a single-owner rootfs without subordinate IDs:
 
-```bash
-unroot enter --single ~/roots/appliance -- /bin/sh
+```console
+$ unroot enter --single ~/rootfs -- /bin/sh
 ```
 
 **Note:** To use managed rich roots (the default mode for `unpack` and `enter`),
 your account needs subordinate UID and GID ranges configured in
 `/etc/subuid` and `/etc/subgid`. This is a one-time host setup that enables
 unprivileged multi-user chroots. Native mode and rooted `--single` do not
-require subordinate IDs.
+require subordinate IDs. The tradeoff is that you can only be `root` inside
+the rootfs.
 
 To configure rich root support, add entries for your username (replace `drobbins`):
 
-```bash
-# View current allocations (if any)
-getent subuid "$USER"
-getent subgid "$USER"
+```console
+$ # View current allocations (if any)
+$ getent subuid "$USER"
+$ getent subgid "$USER"
 
-# Add subordinate ranges (requires root)
-echo "drobbins:100000:65536" | sudo tee -a /etc/subuid
-echo "drobbins:100000:65536" | sudo tee -a /etc/subgid
+$ # Add subordinate ranges (requires root)
+$ echo "drobbins:100000:65536" | sudo tee -a /etc/subuid
+$ echo "drobbins:100000:65536" | sudo tee -a /etc/subgid
 ```
 
 Each line has three fields: `username:start_id:count`. This example allocates
@@ -259,8 +276,8 @@ The default rich root represents logical IDs 0–65535. If an archive uses a
 higher UID or GID, allocate sufficient subordinate IDs and choose the required
 headroom when creating the root:
 
-```bash
-unroot unpack --id-count 100000 rootfs.tar.xz ~/roots/large-ids
+```console
+$ unroot unpack --id-count 100000 rootfs.tar.xz ~/roots/large-ids
 ```
 
 `--id-count` excludes rootfs ID 0, so this example represents IDs 0–100000 and
@@ -272,11 +289,8 @@ and selects an appropriate emulator. If QEMU user-mode emulation is already
 installed and registered on your host, unroot will reuse it. For rich roots, you
 can also select an explicit static emulator and QEMU CPU:
 
-```bash
-unroot enter ~/arm64-rootfs \
-    --qemu /opt/qemu-aarch64-static \
-    --qemu-cpu cortex-a53 \
-    -- /bin/sh
+```console 
+$ unroot enter ~/arm64-rootfs --qemu /opt/qemu-aarch64-static --qemu-cpu cortex-a53 -- /bin/sh
 ```
 
 Use `--emulation never` when a foreign target should fail rather than run under
@@ -297,7 +311,7 @@ Unroot currently supports raw root filesystem tar archives, with filesystem
 entries such as `bin/`, `etc/`, and `usr/` directly at the archive root. Gentoo
 and Funtoo stage tarballs are common examples. Wrapping directories,
 OCI/container-image layouts, disk images, and installer media are not currently
-supported; additional formats may be added in the future.
+supported; additional formats will likely be added in the future.
 
 `unroot unpack ARCHIVE ROOT` creates a managed rich rootfs and extracts the
 archive inside its subordinate-ID mapping. It opens and inspects the archive,
@@ -319,9 +333,9 @@ host representation. This makes `pack` and `unpack` the safe way to copy a rootf
 between ownership models. For example, turn a rich root into a separate native,
 host-root-owned tree with:
 
-```bash
-unroot pack ~/roots/gentoo-rich gentoo.tar.zst
-sudo unroot unpack --native gentoo.tar.zst ~/roots/gentoo-native
+```console
+$ unroot pack ~/roots/gentoo-rich gentoo.tar.zst
+$ sudo unroot unpack --native gentoo.tar.zst ~/roots/gentoo-native
 ```
 
 To go the other way, run `sudo unroot pack` on a managed native root and unpack
@@ -330,12 +344,7 @@ modified during either conversion.
 
 Packing requires a managed rootfs. Unpacking requires an empty destination and
 never overlays an existing tree. Host-specific `.unroot` metadata is excluded
-from archives; incoming archives containing it are rejected. Unsafe archive
-paths and OCI image layouts are also rejected before extraction.
-
-`enter` always expects a distinct root filesystem and rejects any path that
-resolves to the host `/`. Use ordinary host execution when no root change is
-intended.
+from archives; incoming archives containing it are rejected.
 
 ## Managing Rootfs Injections
 
@@ -346,32 +355,32 @@ are durable: later `enter` commands simply use the current files.
 
 See what is registered:
 
-```bash
-unroot inject list ~/rootfs
-unroot inject list ~/rootfs --json
+```console
+$ unroot inject list ~/rootfs
+$ unroot inject list ~/rootfs --json
 ```
 
 Remove one default and restore its original rootfs file, or add it again using
 fresh host content:
 
-```bash
-unroot inject remove ~/rootfs hosts
-unroot inject add ~/rootfs hosts
+```console
+$ unroot inject remove ~/rootfs hosts
+$ unroot inject add ~/rootfs hosts
 ```
 
-To create a rootfs without one or both defaults, subtract them at unpack time:
+To create a rootfs without one or both defaults, you subtract them at unpack time
+in addition to removing them after with `unroot inject remove`:
 
-```bash
-unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs
-unroot unpack --inject=-* stage3.tar.xz ~/rootfs
+```console
+$ unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs
+$ unroot unpack --inject=-* stage3.tar.xz ~/rootfs
 ```
 
 You can also register an explicitly authorized host file. This example installs
 a root-owned mode-`0600` copy at `/etc/example/config`:
 
-```bash
-unroot inject add ~/rootfs \
-    /host/config:/etc/example/config:0:0:0600
+```console
+$ unroot inject add ~/rootfs /host/config:/etc/example/config:0:0:0600
 ```
 
 `unroot inject remove` restores the destination that was preserved when the
@@ -493,9 +502,9 @@ host's libarchive through the same helper. See
 
 ## Build And Test
 
-```bash
-make cli
-make check
+```console
+$ make cli
+$ make check
 ```
 
 `make test` runs the fast C++ suite. `make e2e` exercises real namespaces using
