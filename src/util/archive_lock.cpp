@@ -27,12 +27,19 @@ bool sameFile(int descriptor, int parent, const std::string& name) {
            opened.st_dev == linked.st_dev && opened.st_ino == linked.st_ino;
 }
 
+void releaseRoot(ArchiveLock& lock) {
+    if (lock.created && lock.parent && lock.rootDescriptor &&
+        !lock.rootName.empty() &&
+        sameFile(lock.rootDescriptor.get(), lock.parent.get(), lock.rootName))
+        (void)::unlinkat(lock.parent.get(), lock.rootName.c_str(), AT_REMOVEDIR);
+    lock.created = false;
+    lock.rootDescriptor.reset();
+}
+
 } // namespace
 
 ArchiveLock::~ArchiveLock() {
-    rootDescriptor.reset();
-    if (created && parent && !rootName.empty())
-        (void)::unlinkat(parent.get(), rootName.c_str(), AT_REMOVEDIR);
+    releaseRoot(*this);
 }
 
 ArchiveLock::ArchiveLock(ArchiveLock&& other) noexcept
@@ -46,9 +53,7 @@ ArchiveLock::ArchiveLock(ArchiveLock&& other) noexcept
 
 ArchiveLock& ArchiveLock::operator=(ArchiveLock&& other) noexcept {
     if (this == &other) return *this;
-    rootDescriptor.reset();
-    if (created && parent && !rootName.empty())
-        (void)::unlinkat(parent.get(), rootName.c_str(), AT_REMOVEDIR);
+    releaseRoot(*this);
     parent = std::move(other.parent);
     rootDescriptor = std::move(other.rootDescriptor);
     root = std::move(other.root);
@@ -83,9 +88,15 @@ ArchiveLock acquireArchiveLock(const std::filesystem::path& rootPath,
                                      O_RDONLY | O_DIRECTORY | O_NOFOLLOW |
                                          O_CLOEXEC));
     if (!rootDescriptor) return failure("unable to open ROOT for archive lock");
+    ArchiveLock result;
+    result.parent = std::move(parent);
+    result.rootDescriptor = std::move(rootDescriptor);
+    result.root = rootPath;
+    result.rootName = rootName;
+    result.created = created;
     int locked;
     do {
-        locked = ::flock(rootDescriptor.get(), LOCK_EX | LOCK_NB);
+        locked = ::flock(result.rootDescriptor.get(), LOCK_EX | LOCK_NB);
     } while (locked != 0 && errno == EINTR);
     if (locked != 0) {
         if (errno == EACCES || errno == EAGAIN)
@@ -93,12 +104,6 @@ ArchiveLock acquireArchiveLock(const std::filesystem::path& rootPath,
         return failure("unable to lock rootfs archive operations");
     }
 
-    ArchiveLock result;
-    result.parent = std::move(parent);
-    result.rootDescriptor = std::move(rootDescriptor);
-    result.root = rootPath;
-    result.rootName = rootName;
-    result.created = created;
     if (!result.matchesRoot())
         return failure("ROOT changed during archive lock acquisition");
     return result;
@@ -106,7 +111,8 @@ ArchiveLock acquireArchiveLock(const std::filesystem::path& rootPath,
 
 bool ArchiveLock::matchesRoot() const {
     return parent && rootDescriptor &&
-           sameFile(rootDescriptor.get(), parent.get(), rootName);
+           sameFile(rootDescriptor.get(), parent.get(), rootName) &&
+           sameFile(rootDescriptor.get(), AT_FDCWD, root.string());
 }
 
 std::filesystem::path ArchiveLock::pinnedRoot() const {
