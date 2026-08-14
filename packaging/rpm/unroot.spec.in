@@ -11,6 +11,7 @@ Source0:        unroot-@SOURCE_VERSION@.tar.xz
 
 BuildRequires:  gcc-c++
 BuildRequires:  glibc-static
+BuildRequires:  libarchive-devel
 BuildRequires:  libstdc++-static
 BuildRequires:  make
 BuildRequires:  python3
@@ -18,30 +19,26 @@ BuildRequires:  python3-pytest
 BuildRequires:  shadow-utils-subid-devel
 Requires:       /usr/bin/newgidmap
 Requires:       /usr/bin/newuidmap
-Requires:       tar
 @QEMU_RECOMMENDS@
-Suggests:       gzip
-Suggests:       xz
-Suggests:       zstd
 
 %description
 Unroot enters, runs, creates, and transports Linux root filesystems using
 namespaces, durable subordinate-ID mappings, and optional QEMU user-mode
 emulation. It supports unprivileged rich roots, native host-owned roots,
-single-owner rootfs entry, and faithful rootfs archives without a
+single-owner rootfs entry, and libarchive-backed rootfs transport without a
 resident container daemon.
 
 %prep
 %setup -q -n unroot-@SOURCE_VERSION@
 
 %build
-make %{?_smp_mflags} all
+make %{?_smp_mflags} all UNROOT_UTIL_LIBARCHIVE=1
 
 %install
-make install DESTDIR=%{buildroot} PREFIX=/usr
+make install DESTDIR=%{buildroot} PREFIX=/usr UNROOT_UTIL_LIBARCHIVE=1
 
 %check
-make %{?_smp_mflags} test STRIP_BINARY=0
+make %{?_smp_mflags} test STRIP_BINARY=0 UNROOT_UTIL_LIBARCHIVE=1
 python3 -m pytest -q tests/test_docatoms.py tests/test_packaging.py tests/test_release.py
 
 %files

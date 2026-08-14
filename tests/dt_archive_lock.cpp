@@ -78,6 +78,22 @@ TEST_CASE("archive lock detects root path replacement") {
     std::filesystem::rename(moved, tree.root);
 }
 
+TEST_CASE("archive lock detects parent path replacement") {
+    LockTree tree;
+    const auto root = tree.root / "root";
+    std::filesystem::create_directory(root);
+    auto lock = util::acquireArchiveLock(root, false);
+    REQUIRE(lock);
+    const auto moved = tree.root.string() + "-moved";
+    std::filesystem::rename(tree.root, moved);
+    std::filesystem::create_directories(root);
+
+    CHECK_FALSE(lock.matchesRoot());
+
+    std::filesystem::remove_all(tree.root);
+    std::filesystem::rename(moved, tree.root);
+}
+
 TEST_CASE("archive lock creates and pins a missing rootfs") {
     LockTree tree;
     const auto missing = tree.root / "root";
@@ -124,4 +140,19 @@ TEST_CASE("archive lock removes an unused rootfs created for preflight") {
     }
 
     CHECK_FALSE(std::filesystem::exists(missing));
+}
+
+TEST_CASE("archive lock cleanup preserves a replacement rootfs") {
+    LockTree tree;
+    const auto missing = tree.root / "root";
+    const auto moved = tree.root / "moved";
+    {
+        auto owner = util::acquireArchiveLock(missing, true);
+        REQUIRE(owner);
+        std::filesystem::rename(missing, moved);
+        std::filesystem::create_directory(missing);
+    }
+
+    CHECK(std::filesystem::is_directory(missing));
+    CHECK(std::filesystem::is_directory(moved));
 }

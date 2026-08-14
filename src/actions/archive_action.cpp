@@ -1,19 +1,25 @@
 #include "archive_action.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fcntl.h>
 #include <iostream>
 #include <unistd.h>
+#include <vector>
 
 #include "app_exception.hpp"
+#include "archive_backend.hpp"
 #include "archive_config.hpp"
-#include "linuxns.hpp"
+#include "archive_input.hpp"
+#include "archive_inspector.hpp"
+#include "filesystem_inspector.hpp"
 #include "meta.hpp"
+#include "injections.hpp"
 #include "util/archive_lock.hpp"
 #include "util/error_map.hpp"
 #include "util/fd.hpp"
-#include "util/path.hpp"
-#include "util/proc.hpp"
 
 namespace actions {
 namespace {
@@ -68,76 +74,6 @@ util::IdMapPlan unpackMap(const fs::path& root, util::IdMapMode mode,
   return std::move(selected.plan);
 }
 
-std::string tarPath() {
-  std::string tar = util::findOnPath("tar");
-  if (tar.empty()) fail("GNU tar was not found on PATH");
-  return absolutePath(tar).string();
-}
-
-void validateArchive(const std::string& tar, const fs::path& archive) {
-  const std::string file = "--file=" + archive.string();
-  if (util::spawn_and_wait_execv(tar, {tar, "--list", file}, true) != 0)
-    fail("unable to read tar archive: " + archive.string());
-  for (const char* pattern :
-       {".unroot", ".unroot/*", "./.unroot", "./.unroot/*"}) {
-    if (util::spawn_and_wait_execv(
-            tar, {tar, "--list", file, "--wildcards", "--anchored", pattern},
-            true) == 0)
-      fail("archive contains the reserved .unroot metadata tree");
-  }
-}
-
-int runTar(const fs::path& root, const util::IdMapPlan& idmap,
-           std::vector<std::string> arguments) {
-  const char* path = ::getenv("PATH");
-  NsEnvVars environment{{"PATH", path && *path ? path : "/usr/bin:/bin"},
-                        {"LC_ALL", "C"}};
-  const std::string cwd = root.string();
-  NsResult result = enterNamespace({}, arguments, idmap, nullptr, nullptr,
-                                   &environment, &cwd);
-  if (result.code == -1) {
-    try {
-      return std::stoi(result.msg);
-    } catch (...) {
-      return 1;
-    }
-  }
-  if (result.code != 0)
-    std::cerr << "archive namespace failed: " << result.msg
-              << " (code=" << result.code << ")\n";
-  return result.code;
-}
-
-std::vector<std::string> metadataOptions() {
-  std::vector<std::string> options{"--numeric-owner", "--acls", "--xattrs",
-                                   "--xattrs-include=*"};
-  if (fs::exists("/sys/fs/selinux/enforce")) options.push_back("--selinux");
-  return options;
-}
-
-class MetadataProbeFile {
- public:
-  MetadataProbeFile() {
-    char path[] = "/tmp/.unroot-tar-probe-XXXXXX";
-    UniqueFd file(::mkstemp(path));
-    if (!file) fail("unable to create GNU tar metadata probe file");
-    path_ = path;
-  }
-
-  ~MetadataProbeFile() {
-    if (!path_.empty()) (void)::unlink(path_.c_str());
-  }
-
-  MetadataProbeFile(const MetadataProbeFile&) = delete;
-  MetadataProbeFile& operator=(const MetadataProbeFile&) = delete;
-
-  fs::path directory() const { return path_.parent_path(); }
-  fs::path filename() const { return path_.filename(); }
-
- private:
-  fs::path path_;
-};
-
 class ArchiveOutput {
  public:
   explicit ArchiveOutput(const fs::path& destination)
@@ -150,6 +86,9 @@ class ArchiveOutput {
     if (!directory) fail("unable to create temporary archive directory");
     directory_ = directory;
     temporary_ = directory_ / destination.filename();
+    descriptor_.reset(::open(temporary_.c_str(),
+                             O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666));
+    if (!descriptor_) fail("unable to create temporary archive output");
   }
 
   ~ArchiveOutput() {
@@ -157,9 +96,11 @@ class ArchiveOutput {
     if (!directory_.empty()) (void)::rmdir(directory_.c_str());
   }
 
-  const fs::path& path() const { return temporary_; }
+  int descriptor() const { return descriptor_.get(); }
 
   void publish() {
+    if (::fsync(descriptor_.get()) != 0) fail("unable to sync archive output");
+    descriptor_.reset();
     if (::rename(temporary_.c_str(), destination_.c_str()) != 0)
       fail("unable to publish archive output");
     temporary_.clear();
@@ -170,47 +111,60 @@ class ArchiveOutput {
   fs::path destination_;
   fs::path directory_;
   fs::path temporary_;
+  UniqueFd descriptor_;
 };
 
-void requireMetadataSupport(const std::string& tar, bool force) {
-  MetadataProbeFile probeFile;
-  std::vector<std::string> arguments{tar, "--create", "--file=/dev/null",
-                                     "--no-recursion",
-                                     "--directory=" +
-                                         probeFile.directory().string()};
-  auto metadata = metadataOptions();
-  arguments.insert(arguments.end(), metadata.begin(), metadata.end());
-  arguments.push_back(probeFile.filename().string());
-  auto probe = util::capture_execv(tar, arguments);
-  if (!probe.output.empty() && probe.output.back() != '\n')
-    probe.output.push_back('\n');
-  if (probe.code != 0)
-    fail("unable to verify GNU tar metadata support" +
-         (probe.output.empty() ? std::string() : ":\n" + probe.output));
-  if (probe.output.empty()) return;
-  const std::string message =
-      "GNU tar cannot preserve all requested filesystem metadata:\n" +
-      probe.output;
-  if (!force) fail(message + "Use --force to accept metadata loss.");
-  std::cerr << "Warning: " << message
-            << "Continuing because --force was specified.\n";
+void requireMappedOwnership(const archiveinfo::ArchiveReport& report,
+                            const util::IdMapPlan& idmap) {
+  const uint64_t maximum = std::max(report.maxUid, report.maxGid);
+  if (maximum > util::MaxMappedId)
+    fail("archive ownership exceeds the Linux UID/GID domain");
+  if (idmap.mode != util::IdMapMode::Rich) return;
+  const uint64_t limit = util::subordinateIdCount(idmap);
+  if (report.maxUid <= limit && report.maxGid <= limit) return;
+  fail("archive ownership exceeds the selected rich ID map; use --id-count " +
+       std::to_string(maximum) + " or unpack "
+       "with --native");
+}
+
+void requireFilesystemCapabilities(const archiveinfo::ArchiveReport& report,
+                                   const fs::path& root, bool force) {
+  const bool needsAcl = report.acls.count != 0;
+  const bool needsXattr = report.xattrs.count != 0;
+  if (!needsAcl && !needsXattr) return;
+  auto inspected = fsinfo::FilesystemInspector().inspect(root);
+  if (!inspected)
+    fail("unable to inspect destination filesystem: " + inspected.error);
+  const auto require = [&](bool needed, const fsinfo::Capability& capability,
+                           const char* metadata) {
+    if (!needed || capability.supported) return;
+    std::string message = "archive contains " + std::string(metadata) +
+                          ", but the destination filesystem cannot preserve "
+                          "them";
+    if (!capability.detail.empty()) message += ": " + capability.detail;
+    if (!force) fail(message + "; use --force to accept metadata loss");
+    std::cerr << "Warning: " << message << "; continuing due to --force\n";
+  };
+  require(needsAcl, inspected.caps.posixAcl, "POSIX ACLs");
+  require(needsXattr, inspected.caps.xattr, "extended attributes");
 }
 
 }  // namespace
 
 int ArchiveAction::perform(const PackConfig& config) {
   const fs::path root = absolutePath(config.root);
-  const fs::path archive = absolutePath(config.archive);
+  const fs::path archivePath = absolutePath(config.archive);
   auto archiveLock = util::acquireArchiveLock(root, false);
   if (!archiveLock) fail(archiveLock.error);
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   const fs::path pinnedRoot = archiveLock.pinnedRoot();
-  if (isWithin(root, archive)) fail("archive destination must be outside ROOT");
-  if (!fs::is_directory(archive.parent_path()))
+  if (isWithin(root, archivePath))
+    fail("archive destination must be outside ROOT");
+  if (!fs::is_directory(archivePath.parent_path()))
     fail("archive destination directory does not exist");
-  const std::string tar = tarPath();
-  requireMetadataSupport(tar, config.force);
-  ArchiveOutput output(archive);
+  archive::Backend backend;
+  if (!backend) fail(backend.error());
+  ArchiveOutput output(archivePath);
 
   auto stored = meta::readIdMap(pinnedRoot);
   if (!stored.error.empty()) fail("idmap: " + stored.error);
@@ -220,63 +174,64 @@ int ArchiveAction::perform(const PackConfig& config) {
         "first");
   auto idmap = resolvedMap(pinnedRoot, stored.plan.mode,
                            util::subordinateIdCount(stored.plan), false);
+  auto injectionPlan = injections::archivePlan(pinnedRoot);
+  if (!injectionPlan) fail(injectionPlan.error);
 
-  std::vector<std::string> arguments{tar,
-                                     "--create",
-                                     "--auto-compress",
-                                     "--format=pax",
-                                     "--file=" + output.path().string(),
-                                     "--sparse",
-                                     "--anchored",
-                                     "--exclude=.unroot",
-                                     "--exclude=./.unroot"};
-  auto metadata = metadataOptions();
-  arguments.insert(arguments.end(), metadata.begin(), metadata.end());
-  arguments.push_back(".");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
-  const int result = runTar(pinnedRoot, idmap, std::move(arguments));
+  const int result = backend.create(pinnedRoot, idmap, output.descriptor(),
+                                    archivePath, injectionPlan, config.force);
+  if (result == -1) fail("unable to prepare archive output");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (result == 0) output.publish();
   return result;
 }
 
 int ArchiveAction::perform(const UnpackConfig& config) {
-  const fs::path archive = absolutePath(config.archive);
+  const fs::path archivePath = absolutePath(config.archive);
   const fs::path root = absolutePath(config.root);
+  archive::Backend backend;
+  if (!backend) fail(backend.error());
+  archiveio::Input input(archivePath);
+  if (!input) fail(input.error());
+  if (isWithin(root, archivePath)) fail("archive source must be outside ROOT");
   auto archiveLock = util::acquireArchiveLock(root, true);
   if (!archiveLock) fail(archiveLock.error);
   const fs::path pinnedRoot = archiveLock.pinnedRoot();
-  const std::string tar = tarPath();
-  validateArchive(tar, archive);
-  if (isWithin(root, archive)) fail("archive source must be outside ROOT");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (rootfsHasPayload(pinnedRoot)) fail("ROOT must be empty before unpacking");
-  requireMetadataSupport(tar, config.force);
-
   const auto mode = config.native ? util::IdMapMode::Native
                                   : util::IdMapMode::Rich;
   auto idmap = unpackMap(pinnedRoot, mode, config.idCount,
                          config.idCountSpecified);
+  auto inspection = archiveio::Inspector().inspect(input);
+  if (!inspection) fail("unable to inspect archive: " + inspection.error);
+  if (inspection.report.reservedMetadata)
+    fail("archive contains the reserved .unroot metadata tree");
+  if (inspection.report.ociLayout)
+    fail("archive is an OCI image layout; unroot unpack currently expects a "
+         "raw rootfs tar archive or an extracted OCI layer");
+  if (inspection.report.unsafePaths.count != 0)
+    fail("archive contains paths outside the rootfs");
+  requireMappedOwnership(inspection.report, idmap);
+  requireFilesystemCapabilities(inspection.report, pinnedRoot, config.force);
   archiveLock.preserveRoot();
   auto initialized = meta::initializeIdMap(pinnedRoot, idmap, root);
   if (!initialized) fail("idmap: " + initialized.error);
   if (initialized.plan.mode != mode)
     fail("rootfs ownership mode changed during initialization");
 
-  std::vector<std::string> arguments{tar,
-                                     "--extract",
-                                     "--file=" + archive.string(),
-                                     "--same-owner",
-                                     "--same-permissions",
-                                     "--delay-directory-restore",
-                                     "--anchored",
-                                     "--exclude=.unroot",
-                                     "--exclude=./.unroot"};
-  auto metadata = metadataOptions();
-  arguments.insert(arguments.end(), metadata.begin(), metadata.end());
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
-  const int result = runTar(pinnedRoot, initialized.plan, std::move(arguments));
+  const int result =
+      backend.extract(pinnedRoot, initialized.plan, input, config.force);
+  if (result == -1) fail("unable to prepare archive for extraction");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
+  if (result == 0) {
+    std::string error;
+    if (!injections::add(
+            pinnedRoot.string(), initialized.plan,
+            injections::defaults(config.disabledInjections), error))
+      fail("injections: " + error);
+  }
   return result;
 }
 

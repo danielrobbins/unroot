@@ -11,6 +11,33 @@ CXX     ?= g++
 PYTHON  ?= python3
 PYTEST  ?= $(PYTHON) -m pytest
 
+# Use the host's available CPUs unless the caller supplied an explicit job
+# count. GNU Make decides its jobserver size before reading makefiles, so a
+# serial outer invocation re-enters this file once with an explicit job count.
+DEFAULT_JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+
+ifeq ($(UNROOT_PARALLEL),)
+.PHONY: __unroot_parallel $(MAKECMDGOALS)
+.DEFAULT_GOAL := __unroot_parallel
+
+__unroot_parallel:
+	+@set -e; \
+	goals='$(if $(MAKECMDGOALS),$(filter-out clean,$(MAKECMDGOALS)),all)'; \
+	if [ -n '$(filter clean,$(MAKECMDGOALS))' ]; then \
+	  $(MAKE) UNROOT_PARALLEL=1 clean; \
+	  [ -n "$$goals" ] || exit 0; \
+	fi; \
+	if printf '%s' "$$MAKEFLAGS" | grep -Eq -- '--jobserver-(auth|fds)='; then \
+	  $(MAKE) UNROOT_PARALLEL=1 $$goals; \
+	elif printf ' %s ' "$$MAKEFLAGS" | grep -Eq -- ' (-j1|--jobs(=1)?) '; then \
+	  $(MAKE) UNROOT_PARALLEL=1 $$goals; \
+	else \
+	  $(MAKE) --jobs=$(DEFAULT_JOBS) UNROOT_PARALLEL=1 $$goals; \
+	fi
+
+$(MAKECMDGOALS): __unroot_parallel
+else
+
 # --- Auto-detect musl vs glibc -------------------------------------------------
 # We no longer bootstrap a toolchain; we rely on whatever $(CXX) points to.
 # Detection heuristic: compiler triple contains "musl".
@@ -52,6 +79,7 @@ BIN_DIR := bin
 SRC_DIR := src
 INC_DIR := $(SRC_DIR)
 INC_DIR2 := $(SRC_DIR)/include
+BUILD_DIR := build
 
 # Version detection for release artifacts (used by docs); falls back to dev string
 VERSION ?= $(shell if [ -f VERSION ]; then cat VERSION; elif git describe --tags --match '[0-9]*' --abbrev=0 >/dev/null 2>&1; then git describe --tags --match '[0-9]*' --abbrev=0; else echo 0.0.0+dev; fi)
@@ -59,7 +87,57 @@ VERSION ?= $(shell if [ -f VERSION ]; then cat VERSION; elif git describe --tags
 TARGET_BIN ?= $(BIN_DIR)/unroot
 UTIL_BIN ?= $(BIN_DIR)/unroot-util
 UNROOT_UTIL_LIBSUBID ?= auto
-UTIL_SOURCES := $(SRC_DIR)/unroot_util.cpp $(SRC_DIR)/util/subid_backend.cpp
+UNROOT_UTIL_LIBARCHIVE ?= auto
+
+ifeq ($(filter $(UNROOT_UTIL_LIBSUBID),auto 0 1),)
+$(error UNROOT_UTIL_LIBSUBID must be auto, 0, or 1)
+endif
+ifeq ($(filter $(UNROOT_UTIL_LIBARCHIVE),auto 0 1),)
+$(error UNROOT_UTIL_LIBARCHIVE must be auto, 0, or 1)
+endif
+
+ifeq ($(UNROOT_UTIL_LIBSUBID),auto)
+UTIL_HAVE_LIBSUBID := $(shell $(CXX) -DUNROOT_PROBE_LIBSUBID scripts/optional_library_probe.cpp -o /dev/null -lsubid >/dev/null 2>&1 && echo 1 || echo 0)
+else
+UTIL_HAVE_LIBSUBID := $(UNROOT_UTIL_LIBSUBID)
+endif
+
+ifeq ($(UNROOT_UTIL_LIBARCHIVE),auto)
+UTIL_HAVE_LIBARCHIVE := $(shell $(CXX) -DUNROOT_PROBE_LIBARCHIVE scripts/optional_library_probe.cpp -o /dev/null -larchive >/dev/null 2>&1 && echo 1 || echo 0)
+else
+UTIL_HAVE_LIBARCHIVE := $(UNROOT_UTIL_LIBARCHIVE)
+endif
+
+UTIL_FEATURE_FLAGS :=
+UTIL_LIBS :=
+ifeq ($(UTIL_HAVE_LIBSUBID),1)
+UTIL_FEATURE_FLAGS += -DUNROOT_HAVE_LIBSUBID=1
+UTIL_LIBS += -lsubid
+UTIL_IDMAP_BACKEND := libsubid
+else
+UTIL_IDMAP_BACKEND := files
+endif
+ifeq ($(UTIL_HAVE_LIBARCHIVE),1)
+UTIL_FEATURE_FLAGS += -DUNROOT_HAVE_LIBARCHIVE=1
+UTIL_LIBS += -larchive
+UTIL_ARCHIVE_BACKEND := libarchive
+else
+UTIL_ARCHIVE_BACKEND := unavailable
+endif
+
+UTIL_SOURCES := \
+	$(SRC_DIR)/unroot_util.cpp \
+	$(SRC_DIR)/archive_report.cpp \
+	$(SRC_DIR)/filesystem_caps.cpp \
+	$(SRC_DIR)/util/archive_fd.cpp \
+	$(SRC_DIR)/util/archive_engine.cpp \
+	$(SRC_DIR)/util/archive_inspector.cpp \
+	$(SRC_DIR)/util/filesystem_probe.cpp \
+	$(SRC_DIR)/util/rootfs.cpp \
+	$(SRC_DIR)/util/subid_backend.cpp
+UTIL_BUILD_DIR := $(BUILD_DIR)/unroot-util/subid-$(UTIL_HAVE_LIBSUBID)-archive-$(UTIL_HAVE_LIBARCHIVE)
+UTIL_OBJECTS := $(addprefix $(UTIL_BUILD_DIR)/,$(UTIL_SOURCES:.cpp=.o))
+UTIL_DEPS := $(UTIL_OBJECTS:.o=.d)
 
 # Default target: C++ build + generated docs
 .PHONY: all
@@ -72,7 +150,8 @@ clean:
 	find $(SRC_DIR) -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true; \
 	find legacy -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true; \
 	rm -f *.o *.d legacy/*.o legacy/sds/*.o $(BIN_DIR)/unroot $(UTIL_BIN) $(BIN_DIR)/unroot-tests $(BIN_DIR)/unroot-legacy $(BIN_DIR)/unroot-d 2>/dev/null || true; \
-	rm -f $(BUILD_DIR)/libsubid-probe 2>/dev/null || true; \
+	rm -rf $(BUILD_DIR)/unroot-util 2>/dev/null || true; \
+	rm -rf $(BUILD_DIR)/doctest 2>/dev/null || true; \
 	rm -f $(BUILD_DIR)/version.hpp 2>/dev/null || true
 
 ## C++ (primary) build
@@ -85,6 +164,13 @@ CPP_SOURCES := \
 	$(SRC_DIR)/linuxns.cpp \
 	$(SRC_DIR)/binfmt.cpp \
 	$(SRC_DIR)/meta.cpp \
+	$(SRC_DIR)/injections.cpp \
+	$(SRC_DIR)/archive_report.cpp \
+	$(SRC_DIR)/archive_input.cpp \
+	$(SRC_DIR)/archive_inspector.cpp \
+	$(SRC_DIR)/archive_backend.cpp \
+	$(SRC_DIR)/filesystem_caps.cpp \
+	$(SRC_DIR)/filesystem_inspector.cpp \
 	$(SRC_DIR)/shebang.cpp \
 	$(SRC_DIR)/emulation.cpp \
 	$(SRC_DIR)/compat_blacklist.cpp \
@@ -95,10 +181,15 @@ CPP_SOURCES := \
 	$(SRC_DIR)/actions/config_base.cpp \
 	$(SRC_DIR)/actions/archive_config.cpp \
 	$(SRC_DIR)/actions/archive_action.cpp \
+	$(SRC_DIR)/actions/injection_config.cpp \
+	$(SRC_DIR)/actions/injection_action.cpp \
+	$(SRC_DIR)/actions/inspect_config.cpp \
+	$(SRC_DIR)/actions/inspect_action.cpp \
 	$(SRC_DIR)/actions/enter_config.cpp \
 	$(SRC_DIR)/actions/enter_action.cpp \
 	$(SRC_DIR)/actions/parsed_args.cpp \
 	$(SRC_DIR)/util/archive_lock.cpp \
+	$(SRC_DIR)/util/host_helper.cpp \
 	$(SRC_DIR)/util/path.cpp \
 	$(SRC_DIR)/util/idmap.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
@@ -109,7 +200,6 @@ CPP_OBJECTS := $(CPP_SOURCES:.cpp=.o)
 CPP_DEPS := $(CPP_OBJECTS:.o=.d)
 
 # Generated build/version header (git SHA + parsed semantic version components)
-BUILD_DIR := build
 VERSION_HDR := $(BUILD_DIR)/version.hpp
 
 .PHONY: FORCE
@@ -161,7 +251,9 @@ warnclean: CXXFLAGS := $(filter-out -flto -flto=auto -fno-fat-lto-objects,$(CXXF
 warnclean: CFLAGS := $(filter-out -flto -flto=auto -fno-fat-lto-objects,$(CFLAGS)) -Werror
 warnclean: LDFLAGS := $(filter-out -flto -flto=auto,$(LDFLAGS))
 warnclean: LTO=0
-warnclean: clean all
+warnclean:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS='$(CXXFLAGS)' CFLAGS='$(CFLAGS)' LDFLAGS='$(LDFLAGS)' LTO=0 all
 
 # Optional size tuning (explicit opt-in): keeps exceptions unless user also sets NO_EXCEPTIONS=1
 NO_EXCEPTIONS ?= 0
@@ -190,30 +282,21 @@ $(TARGET_BIN): $(CPP_OBJECTS)
 	fi
 
 # Host integration is deliberately kept outside the static namespace engine.
-# Build unroot-util dynamically, using libsubid when its development interface
-# is available and the portable local-file backend otherwise.
-$(UTIL_BIN): $(UTIL_SOURCES) $(SRC_DIR)/util/subid.hpp $(SRC_DIR)/util/subid_backend.hpp $(VERSION_HDR)
-	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
-	@set -e; \
-	use_libsubid="$(UNROOT_UTIL_LIBSUBID)"; \
-	if [ "$$use_libsubid" = auto ]; then \
-	  if printf '%s\n' '#include <cstdlib>' '#if __has_include(<shadow/subid.h>)' '#include <shadow/subid.h>' '#elif __has_include(<subid.h>)' '#include <subid.h>' '#else' '#error libsubid header unavailable' '#endif' 'int main(){struct subid_range *r=0; if(!subid_init("probe", 0)) return 1; int n=subid_get_uid_ranges("0", &r); std::free(r); return n<0;}' | \
-	       $(CXX) -x c++ - -o $(BUILD_DIR)/libsubid-probe -lsubid >/dev/null 2>&1; then \
-	    use_libsubid=1; \
-	  else \
-	    use_libsubid=0; \
-	  fi; \
-	fi; \
-	case "$$use_libsubid" in 0|1) ;; *) echo "UNROOT_UTIL_LIBSUBID must be auto, 0, or 1" >&2; exit 2;; esac; \
-	flags=""; libs=""; \
-	if [ "$$use_libsubid" = 1 ]; then \
-	  flags="-DUNROOT_HAVE_LIBSUBID=1"; libs="-lsubid"; backend=libsubid; \
-	else \
-	  backend=files; \
-	fi; \
-	echo "Building unroot-util (backend: $$backend)"; \
-	$(CXX) $(filter-out -static -MMD -MP,$(CXXFLAGS)) $(CPP_INCLUDES) $$flags \
-	  $(UTIL_SOURCES) -o $@ $(filter-out -static,$(LDFLAGS)) $$libs; \
+# Compile each helper source independently so a normal parallel build covers
+# unroot-util too. The feature tuple in the object path prevents stale objects
+# when either optional backend is enabled or disabled.
+-include $(UTIL_DEPS)
+
+$(UTIL_BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(filter-out -static,$(CXXFLAGS)) $(CPP_INCLUDES) $(UTIL_FEATURE_FLAGS) -c $< -o $@
+
+$(UTIL_BUILD_DIR)/src/unroot_util.o: $(VERSION_HDR)
+
+$(UTIL_BIN): $(UTIL_OBJECTS) $(VERSION_HDR)
+	@mkdir -p $(BIN_DIR)
+	@echo "Building unroot-util (idmap: $(UTIL_IDMAP_BACKEND), archive: $(UTIL_ARCHIVE_BACKEND))"
+	$(CXX) $(filter-out -static -MMD -MP,$(CXXFLAGS)) $(CPP_INCLUDES) $(UTIL_OBJECTS) -o $@ $(filter-out -static,$(LDFLAGS)) $(UTIL_LIBS)
 	if [ "$(STRIP_BINARY)" = 1 ] && command -v $(STRIP) >/dev/null 2>&1; then \
 	  $(STRIP) -s $@; \
 	fi
@@ -255,7 +338,7 @@ doctest-coverage:
 	  clang++ -Wall -Wextra -O0 -g -std=c++17 -fprofile-instr-generate -fcoverage-mapping -DUNROOT_ENABLE_DOCTEST \
 	    -Isrc -Isrc/include -Ithird_party/doctest \
 	    tests/doctest_main.cpp tests/dt_compat_blacklist.cpp tests/dt_option_parser.cpp tests/dt_option_parser_trailing.cpp tests/dt_action_trailing_negative.cpp tests/dt_enter_config_trailing.cpp tests/dt_enter_config_integration.cpp tests/dt_enter_config_idmap.cpp tests/dt_util_path.cpp tests/dt_util_subid.cpp tests/dt_error_map.cpp tests/dt_app_exit.cpp tests/dt_arch.cpp tests/dt_arch_errors.cpp tests/dt_exception_handler.cpp tests/enter_action_stub.cpp \
-	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
+	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/injections.cpp src/util/rootfs.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
 	    -o bin/unroot-tests-doctest-cov -pthread || { echo "[doctest-cov] clang build failed; falling back to GCC"; false; }; \
 	  echo "[doctest-cov] Running doctest harness"; \
 	  LLVM_PROFILE_FILE=coverage/doctest/coverage-%p.profraw bin/unroot-tests-doctest-cov || true; \
@@ -274,7 +357,7 @@ doctest-coverage:
 	  find . -name '*.gcda' -o -name '*.gcno' -o -name '*.gcov' -delete 2>/dev/null || true; \
 	  g++ -Wall -Wextra -O0 -g -std=c++17 --coverage -DUNROOT_ENABLE_DOCTEST -Isrc -Isrc/include -Ithird_party/doctest \
 	    tests/doctest_main.cpp tests/dt_compat_blacklist.cpp tests/dt_option_parser.cpp tests/dt_option_parser_trailing.cpp tests/dt_action_trailing_negative.cpp tests/dt_enter_config_trailing.cpp tests/dt_enter_config_integration.cpp tests/dt_enter_config_idmap.cpp tests/dt_util_path.cpp tests/dt_util_subid.cpp tests/dt_error_map.cpp tests/dt_app_exit.cpp tests/dt_arch.cpp tests/dt_arch_errors.cpp tests/dt_exception_handler.cpp tests/enter_action_stub.cpp \
-	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
+	    src/compat_blacklist.cpp src/actions/config_base.cpp src/actions/enter_config.cpp src/actions/unified_action_registry.cpp src/actions/parsed_args.cpp src/program_context.cpp src/injections.cpp src/util/rootfs.cpp src/util/path.cpp src/util/subid.cpp src/util/subid_backend.cpp src/arch.cpp src/util/exception_handler.cpp \
 	    -o bin/unroot-tests-doctest-cov -pthread; \
 	  echo "[doctest-cov] Running doctest harness (GCC)"; \
 	  ./bin/unroot-tests-doctest-cov || true; \
@@ -511,19 +594,24 @@ LLVM_PROFDATA ?= llvm-profdata
 # (Removed legacy Catch2 harness variables and targets.)
 
 ## Doctest harness build (all doctest-based unit tests)
-DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp
+DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp tests/injection_action_stub.cpp
 DOCTEST_HARNESS_SRCS := \
+	src/archive_report.cpp \
+	src/filesystem_caps.cpp \
 	src/compat_blacklist.cpp \
 	src/meta.cpp \
+	src/injections.cpp \
 	src/binfmt.cpp \
 	src/hostcaps.cpp \
 	src/actions/config_base.cpp \
 	src/actions/archive_config.cpp \
+	src/actions/injection_config.cpp \
 	src/actions/enter_config.cpp \
 	src/actions/unified_action_registry.cpp \
 	src/actions/parsed_args.cpp \
 	src/program_context.cpp \
 	src/util/archive_lock.cpp \
+	src/util/host_helper.cpp \
 	src/util/path.cpp \
 	src/util/idmap.cpp \
 	src/util/rootfs.cpp \
@@ -535,12 +623,24 @@ DOCTEST_HARNESS_SRCS := \
 
 DOCTEST_TEST_SRCS += tests/coverage_feature_stub.cpp
 
+DOCTEST_SRCS := $(DOCTEST_TEST_SRCS) $(DOCTEST_HARNESS_SRCS)
+DOCTEST_OBJECTS := $(addprefix $(BUILD_DIR)/doctest/,$(DOCTEST_SRCS:.cpp=.o))
+DOCTEST_DEPS := $(DOCTEST_OBJECTS:.o=.d)
+DOCTEST_FLAGS := $(filter-out -static,$(CXXFLAGS)) -DUNROOT_ENABLE_DOCTEST \
+	-I$(SRC_DIR) -I$(INC_DIR2) -Ithird_party/doctest
+
+-include $(DOCTEST_DEPS)
+
+$(BUILD_DIR)/doctest/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(DOCTEST_FLAGS) -c $< -o $@
+
 .PHONY: doctest
-doctest: $(DOCTEST_TEST_SRCS) $(DOCTEST_HARNESS_SRCS)
+doctest: $(BIN_DIR)/unroot-tests-doctest
+
+$(BIN_DIR)/unroot-tests-doctest: $(DOCTEST_OBJECTS)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(filter-out -static,$(CXXFLAGS)) -DUNROOT_ENABLE_DOCTEST -I$(SRC_DIR) -I$(INC_DIR2) -Ithird_party/doctest \
-	  $(DOCTEST_TEST_SRCS) $(DOCTEST_HARNESS_SRCS) \
-	  -o $(BIN_DIR)/unroot-tests-doctest -pthread
+	$(CXX) $(DOCTEST_FLAGS) $^ -o $@ -pthread
 	@echo "[doctest] built bin/unroot-tests-doctest (sources: $$(echo $(DOCTEST_TEST_SRCS) | wc -w))"
 
 .PHONY: test
@@ -595,3 +695,5 @@ d:
 
 d-clean:
 	rm -f $(BIN_DIR)/unroot-d
+
+endif # UNROOT_PARALLEL

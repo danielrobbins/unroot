@@ -1,0 +1,96 @@
+name: Funtoo Heritage Qualification
+
+on:
+  schedule:
+    - cron: "17 7 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: funtoo-heritage-qualification
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: ${{ matrix.name }} on x86-64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Raspberry Pi 4
+            target: raspi4
+            filename: stage3-raspi4-next-2025-01-08.tar.xz
+            url: https://build.funtoo.org/next/arm-64bit/raspi4/2025-01-08/stage3-raspi4-next-2025-01-08.tar.xz
+            sha256: d9aed6a37e95e9336521384d1d701df09639eab692137aa478934ac672977004
+            chost: aarch64-unknown-linux-gnu
+            emulator: qemu-aarch64-static
+          - name: SiFive Freedom U740
+            target: sifive-fu740
+            filename: stage3-sifive-fu740-next-2025-01-08.tar.xz
+            url: https://build.funtoo.org/next/riscv-64bit/sifive-fu740/2025-01-08/stage3-sifive-fu740-next-2025-01-08.tar.xz
+            sha256: 1c12ec34f44f69fc79ecad144fa509bca0f05f6e8ab911217e4b9100feff54b6
+            chost: riscv64-unknown-linux-gnu
+            emulator: qemu-riscv64-static
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install qualification dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libarchive-dev libsubid-dev python3-pytest \
+            qemu-user-static uidmap
+          command -v "${{ matrix.emulator }}"
+      - name: Configure AppArmor user-namespace policy
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 0
+      - name: Configure subordinate IDs
+        run: |
+          sudo sed -i "/^${USER}:/d" /etc/subuid /etc/subgid
+          printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
+          printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
+      - name: Restore the pinned stage3
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/funtoo-stage3
+          key: funtoo-stage3-${{ matrix.target }}-${{ matrix.sha256 }}
+      - name: Acquire the Funtoo stage3
+        run: |
+          directory="${RUNNER_TEMP}/funtoo-stage3"
+          archive="${directory}/${{ matrix.filename }}"
+          mkdir -p "$directory"
+          if ! printf '%s  %s\n' "${{ matrix.sha256 }}" "$archive" \
+              | sha256sum --check --status 2>/dev/null; then
+            rm -f "$archive"
+            curl --fail --location --retry 3 \
+              --output "$archive" "${{ matrix.url }}"
+          fi
+          printf '%s  %s\n' "${{ matrix.sha256 }}" "$archive" \
+            | sha256sum --check --status
+          printf 'UNROOT_E2E_FUNTOO=%s\n' "$archive" >> "$GITHUB_ENV"
+          printf 'UNROOT_E2E_FUNTOO_NAME=%s\n' "${{ matrix.name }}" >> "$GITHUB_ENV"
+          printf 'UNROOT_E2E_FUNTOO_CHOST=%s\n' "${{ matrix.chost }}" >> "$GITHUB_ENV"
+      - name: Build Unroot
+        run: make cli UNROOT_UTIL_LIBARCHIVE=1 UNROOT_UTIL_LIBSUBID=1
+      - name: Run the Funtoo rootfs journey
+        env:
+          UNROOT_E2E_STRICT: "1"
+          UNROOT_E2E_REQUIRE: rootfs_journey
+          UNROOT_E2E_REPORT: e2e-funtoo-${{ matrix.target }}.json
+        run: python3 -m pytest -q tests/e2e/test_funtoo_rootfs.py
+      - name: Upload the qualification report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-funtoo-${{ matrix.target }}
+          path: e2e-funtoo-${{ matrix.target }}.json
+          if-no-files-found: error

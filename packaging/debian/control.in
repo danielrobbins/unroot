@@ -5,6 +5,7 @@ Maintainer: Daniel Robbins <drobbins@breezyops.com>
 Build-Depends:
  debhelper-compat (= 13),
  g++,
+ libarchive-dev,
  libsubid-dev,
  make,
  python3,
@@ -18,13 +19,11 @@ Architecture: any
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
- tar,
  uidmap
 @QEMU_RECOMMENDS@
-Suggests: gzip, xz-utils, zstd
 Description: daemonless Linux rootfs and cross-architecture toolkit
  Unroot enters, runs, creates, and transports Linux root filesystems using
  namespaces, durable subordinate-ID mappings, and optional QEMU user-mode
  emulation. It supports unprivileged rich roots, native host-owned roots,
- single-owner rootfs entry, and faithful rootfs archives without a
+ single-owner rootfs entry, and libarchive-backed rootfs transport without a
  resident container daemon.

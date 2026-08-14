@@ -242,6 +242,18 @@ def run_command(command: Sequence[str], *, timeout: int = 30) -> CommandResult:
     )
 
 
+def rich_idmap_available(unroot: UnrootRunner, count: int = 65535) -> bool:
+    helper = unroot.binary.with_name("unroot-util")
+    return (
+        shutil.which("newuidmap") is not None
+        and shutil.which("newgidmap") is not None
+        and helper.is_file()
+        and os.access(helper, os.X_OK)
+        and run_command([str(helper), "idmap", "--count", str(count)]).returncode
+        == 0
+    )
+
+
 def probe_private_binfmt(target: Path, entry: str) -> CommandResult:
     unshare = shutil.which("unshare")
     mount = shutil.which("mount")

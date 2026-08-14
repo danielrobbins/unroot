@@ -33,6 +33,8 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     assert "--debug" in global_help.stdout
     assert "pack ROOT ARCHIVE" in global_help.stdout
     assert "unpack ARCHIVE ROOT" in global_help.stdout
+    assert "inject OPERATION ROOT" in global_help.stdout
+    assert "inspect SUBJECT" in global_help.stdout
     assert "prepare" not in global_help.stdout
 
     enter_help = unroot.run("enter", "--help").assert_ok()
@@ -46,6 +48,7 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     assert "--qemu" in enter_help.stdout
     assert "--qemu-cpu" in enter_help.stdout
     assert "--single" in enter_help.stdout
+    assert "--inject" not in enter_help.stdout
     assert "--subarch" not in enter_help.stdout
     assert "experimental" not in enter_help.stdout
 
@@ -54,6 +57,26 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     unpack_help = unroot.run("unpack", "--help").assert_ok()
     assert "unpack ARCHIVE ROOT" in unpack_help.stdout
     assert "--native" in unpack_help.stdout
+    assert "--inject" in unpack_help.stdout
+    inject_help = unroot.run("inject", "--help").assert_ok()
+    assert "inject OPERATION ROOT" in inject_help.stdout
+    assert "list, add, remove, or clear" in inject_help.stdout
+    inspect_help = unroot.run("inspect", "--help").assert_ok()
+    assert "inspect SUBJECT" in inspect_help.stdout
+    assert "--json" in inspect_help.stdout
+
+
+def test_inspect_host_reports_runtime_capabilities(unroot: UnrootRunner) -> None:
+    result = unroot.run("inspect", "host", "--json").assert_ok()
+    report = json.loads(result.stdout)
+
+    assert report["kernel"]["release"]
+    assert report["kernel"]["machine"]
+    assert report["namespaces"]["user"]["status"] in {
+        "available", "unavailable", "unknown",
+    }
+    assert report["helpers"]["unroot_util"]["status"] == "available"
+    assert report["archives"]["libarchive"]["status"] == "available"
 
 @pytest.mark.parametrize("arguments", [("unknown-action",), ("unknown-action", "--help")])
 def test_unknown_action_is_usage_error(
@@ -109,6 +132,138 @@ def test_enter_single_changes_root_with_one_id_mapping(
     ).assert_ok()
 
     assert result.stdout == "0:rooted-single-ok:deny"
+
+
+@pytest.mark.parametrize("root", ["/", "//"])
+def test_enter_rejects_the_host_root(unroot: UnrootRunner, root: str) -> None:
+    result = unroot.run("enter", "--single", root, "--", "/bin/true")
+
+    assert result.returncode == 2, result.diagnostic()
+    assert "ROOT resolves to host /" in result.stderr
+
+
+def test_enter_rejects_a_symlink_to_the_host_root(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    root = tmp_path / "host-root"
+    root.symlink_to("/")
+
+    result = unroot.run("enter", "--single", str(root), "--", "/bin/true")
+
+    assert result.returncode == 2, result.diagnostic()
+    assert "ROOT resolves to host /" in result.stderr
+
+
+def test_unmanaged_rootfs_rejects_injection_management(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "unmanaged", busybox)
+
+    result = unroot.run("inject", "add", str(root), "hosts")
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "inject requires a managed rootfs" in result.stderr
+
+
+def test_enter_single_has_usable_procfs(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-proc", busybox)
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        "test -r /proc/self/status; "
+        "test \"$(stat -c %u /proc/self/status)\" = 0; "
+        "grep -q '^Uid:[[:space:]]*0' /proc/self/status; "
+        "printf proc-ok",
+    ).assert_ok()
+
+    assert result.stdout == "proc-ok"
+
+
+def test_enter_single_has_readonly_sysfs_and_inherited_term(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-sysfs", busybox)
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        'test -d /sys/devices/system/cpu && '
+        'mount_line="$(/bin/busybox grep " /sys " /proc/mounts)" && '
+        'case "$mount_line" in *" ro,"*|*" ro "*) : ;; *) exit 1 ;; esac && '
+        'printf "%s" "$TERM"',
+        env={"TERM": "xterm-256color"},
+    ).assert_ok()
+
+    assert result.stdout == "xterm-256color"
+
+
+def test_enter_single_does_not_inject_host_network_files(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-network", busybox)
+    (root / "etc" / "resolv.conf").write_text(
+        "rootfs resolver\n", encoding="utf-8"
+    )
+    (root / "etc" / "hosts").write_text("rootfs hosts\n", encoding="utf-8")
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        "cat /etc/resolv.conf; cat /etc/hosts",
+    ).assert_ok()
+
+    assert result.stdout == "rootfs resolver\nrootfs hosts\n"
+    assert not (root / ".unroot").exists()
 
 
 def test_enter_single_rejects_managed_ownership(
@@ -216,12 +371,16 @@ printf minimal-dev-ok >/dev/stdout
     assert result.stdout == "minimal-dev-ok"
 
 
-def test_native_rootfs_shares_host_resolver_files(
+def test_unmanaged_native_rootfs_does_not_inject_host_network_files(
     unroot: UnrootRunner,
     tmp_path: Path,
     privileged_prefix: tuple[str, ...],
 ) -> None:
     rootfs = create_rootfs(tmp_path / "resolver-files", find_static_busybox())
+    (rootfs / "etc" / "resolv.conf").write_text(
+        "rootfs resolver\n", encoding="utf-8"
+    )
+    (rootfs / "etc" / "hosts").write_text("rootfs hosts\n", encoding="utf-8")
     for name in ("resolv.conf", "hosts"):
         result = run_command(
             [
@@ -237,7 +396,230 @@ def test_native_rootfs_shares_host_resolver_files(
             ]
         ).assert_ok()
 
-        assert result.stdout == Path(f"/etc/{name}").read_text(encoding="utf-8")
+        assert result.stdout == (rootfs / "etc" / name).read_text(encoding="utf-8")
+
+
+def test_managed_rootfs_has_durable_writable_host_network_files(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        "test \"$(stat -c %u:%g /etc/resolv.conf)\" = 0:0; "
+        "test \"$(stat -c %u:%g /etc/hosts)\" = 0:0; "
+        "cat /etc/resolv.conf; cat /etc/hosts",
+    ).assert_ok()
+
+    assert result.stdout == (
+        Path("/etc/resolv.conf").read_text(encoding="utf-8")
+        + Path("/etc/hosts").read_text(encoding="utf-8")
+    )
+    registry = json.loads(
+        (managed_rootfs / ".unroot" / "injections" / "registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {
+        (item["name"], item["destination"], item["original"])
+        for item in registry["entries"]
+    } == {
+        ("resolv.conf", "/etc/resolv.conf", "absent"),
+        ("hosts", "/etc/hosts", "absent"),
+    }
+
+    listed = json.loads(
+        unroot.run("inject", "list", str(managed_rootfs), "--json")
+        .assert_ok()
+        .stdout
+    )
+    assert {item["name"] for item in listed["entries"]} == {
+        "resolv.conf",
+        "hosts",
+    }
+
+
+def test_inject_clear_restores_defaults_and_add_reenables_one(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    unroot.run("inject", "clear", str(managed_rootfs)).assert_ok()
+
+    assert not (managed_rootfs / "etc" / "hosts").exists()
+    assert not (managed_rootfs / "etc" / "resolv.conf").exists()
+    assert (
+        unroot.run("inject", "list", str(managed_rootfs)).assert_ok().stdout
+        == "No injections registered.\n"
+    )
+
+    unroot.run("inject", "add", str(managed_rootfs), "hosts").assert_ok()
+    assert (managed_rootfs / "etc" / "hosts").read_text(
+        encoding="utf-8"
+    ) == Path("/etc/hosts").read_text(encoding="utf-8")
+
+
+def test_inject_remove_validates_all_targets_before_restoring(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "inject", "remove", str(managed_rootfs), "hosts", "not-registered"
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "injection is not registered: not-registered" in result.stderr
+    assert (managed_rootfs / "etc" / "hosts").read_text(
+        encoding="utf-8"
+    ) == Path("/etc/hosts").read_text(encoding="utf-8")
+
+
+def test_custom_refresh_of_builtin_destination_preserves_builtin_name(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "alternate-hosts"
+    source.write_text("alternate hosts\n", encoding="utf-8")
+
+    unroot.run(
+        "inject", "add", str(managed_rootfs), f"{source}:/etc/hosts"
+    ).assert_ok()
+    listed = json.loads(
+        unroot.run("inject", "list", str(managed_rootfs), "--json")
+        .assert_ok()
+        .stdout
+    )
+    hosts = next(
+        item for item in listed["entries"]
+        if item["destination"] == "/etc/hosts"
+    )
+    assert hosts["name"] == "hosts"
+
+    unroot.run("inject", "remove", str(managed_rootfs), "hosts").assert_ok()
+    assert not (managed_rootfs / "etc" / "hosts").exists()
+
+
+def test_custom_injection_follows_source_symlink_and_is_durable(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "injected-source"
+    source.write_text("injected content\n", encoding="utf-8")
+    source_link = tmp_path / "source-link"
+    source_link.symlink_to(source.name)
+    portable = managed_rootfs / "tmp" / "portable-config"
+    portable.write_text("portable content\n", encoding="utf-8")
+    destination = managed_rootfs / "etc" / "custom.conf"
+    destination.symlink_to("../tmp/portable-config")
+    spec = f"{source_link}:/etc/custom.conf:1:1:0600"
+
+    unroot.run("inject", "add", str(managed_rootfs), spec).assert_ok()
+    for _ in range(2):
+        result = unroot.run(
+            "enter",
+            str(managed_rootfs),
+            "--",
+            "/bin/busybox",
+            "sh",
+            "-c",
+            "stat -c %u:%g:%a /etc/custom.conf; cat /etc/custom.conf",
+        ).assert_ok()
+        assert result.stdout == "1:1:600\ninjected content\n"
+
+    assert destination.is_file()
+    assert not destination.is_symlink()
+
+    source.write_text("refreshed content\n", encoding="utf-8")
+    unroot.run("inject", "add", str(managed_rootfs), spec).assert_ok()
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "cat",
+        "/etc/custom.conf",
+    ).assert_ok()
+    assert result.stdout == "refreshed content\n"
+
+    unroot.run(
+        "inject", "remove", str(managed_rootfs), "/etc/custom.conf"
+    ).assert_ok()
+    assert destination.is_symlink()
+    assert destination.readlink() == Path("../tmp/portable-config")
+    assert destination.read_text(encoding="utf-8") == "portable content\n"
+
+
+def test_custom_injection_requires_existing_destination_directory(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "injection-source"
+    source.write_text("content\n", encoding="utf-8")
+
+    result = unroot.run(
+        "inject", "add", str(managed_rootfs), f"{source}:/missing/config"
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "injection destination directory does not exist" in result.stderr
+
+
+def test_custom_injection_restores_an_absent_destination(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "injection-source"
+    source.write_text("temporary\n", encoding="utf-8")
+    destination = managed_rootfs / "etc" / "temporary.conf"
+
+    unroot.run(
+        "inject", "add", str(managed_rootfs),
+        f"{source}:/etc/temporary.conf",
+    ).assert_ok()
+    assert destination.read_text(encoding="utf-8") == "temporary\n"
+
+    unroot.run(
+        "inject", "remove", str(managed_rootfs), "/etc/temporary.conf"
+    ).assert_ok()
+    assert not destination.exists()
+
+
+def test_custom_injection_rejects_directory_destination(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "injection-source"
+    source.write_text("content\n", encoding="utf-8")
+
+    result = unroot.run(
+        "inject", "add", str(managed_rootfs), f"{source}:/etc"
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "destination is not a regular file, symlink, or absent" in result.stderr
+
+
+def test_custom_injection_rejects_non_regular_source(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    result = unroot.run(
+        "inject", "add", str(managed_rootfs),
+        f"{tmp_path}:/etc/custom.conf",
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "does not resolve to a regular file" in result.stderr
+
+
+def test_custom_injection_rejects_fifo_source_without_blocking(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.fifo"
+    os.mkfifo(source)
+
+    result = unroot.run(
+        "inject", "add", str(managed_rootfs),
+        f"{source}:/etc/custom.conf",
+        timeout=2,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "does not resolve to a regular file" in result.stderr
 
 
 def test_qemu_overrides_reject_native_targets(
@@ -615,6 +997,26 @@ def test_child_exit_status_propagates(
         "exit 37",
     )
     assert result.returncode == 37, result.diagnostic()
+
+
+def test_command_help_arguments_cross_the_separator_unchanged(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        '[ "$1" = --help ] && [ "$2" = -h ] && exit 37',
+        "sh",
+        "--help",
+        "-h",
+    )
+
+    assert result.returncode == 37, result.diagnostic()
+    assert "Usage: unroot enter" not in result.stdout
 
 
 @pytest.mark.parametrize(

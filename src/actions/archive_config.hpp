@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "config_base.hpp"
 #include "util/idmap.hpp"
@@ -35,6 +36,7 @@ class UnpackConfig : public ActionConfig {
   bool force = false;
   unsigned int idCount = util::DefaultRichIdCount;
   bool idCountSpecified = false;
+  std::vector<std::string> disabledInjections;
 
   std::string getActionName() const override { return "unpack"; }
   void validate() const override;

@@ -19,7 +19,7 @@
       "title": "SYNOPSIS",
       "short_help": "SYNOPSIS",
       "syntax": "",
-      "description": "```text\nunroot unpack [--id-count COUNT] ARCHIVE ROOT\nsudo unroot unpack --native ARCHIVE ROOT\nunroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nsudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot pack ROOT ARCHIVE\n```",
+      "description": "```text\nunroot unpack [--id-count COUNT] ARCHIVE ROOT\nsudo unroot unpack --native ARCHIVE ROOT\nunroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nsudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]\nunroot pack ROOT ARCHIVE\nunroot inject list ROOT [--json]\nunroot inject add ROOT ITEM [ITEM...]\nunroot inject remove ROOT ITEM [ITEM...]\nunroot inject clear ROOT\nunroot inspect host [--json]\nunroot inspect archive ARCHIVE [--json]\n```",
       "metadata": {
         "priority": "10"
       }
@@ -41,9 +41,67 @@
       "title": "ROOTFS ARCHIVES",
       "short_help": "ROOTFS ARCHIVES",
       "syntax": "",
-      "description": "Unroot currently supports raw root filesystem tar archives. Filesystem entries such as `bin/`, `etc/`, `usr/`, and `var/` must appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Unroot does not currently strip a wrapping directory or import OCI/container-image layouts, disk images, installer media, or distribution-specific bundles. Additional formats may be supported in the future.\n\n`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. `--id-count COUNT` selects a larger or smaller subordinate extent when the archive needs different ownership headroom. *COUNT* excludes rootfs ID 0, so `--id-count 100000` represents logical IDs 0 through 100000. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.\n\n`sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.\n\nBoth forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. With no `--id-count`, its recorded count is reused; an explicitly conflicting mode or count is rejected.\n\n`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.\n\nOnly one archive operation may use a rootfs at a time. `pack` and `unpack` take an exclusive operating-system lock on the pinned root directory and fail immediately when another archive operation is active. Process exit automatically releases the lock, with no lock file to become stale.\n\n`pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:\n\n```console\n$ unroot pack ~/roots/gentoo-rich gentoo.tar.zst\n$ sudo unroot unpack --native gentoo.tar.zst ~/roots/gentoo-native\n```\n\nThe reverse works for a managed native root: run `sudo unroot pack` on that root, then use ordinary `unroot unpack` to create a rich unprivileged copy. Conversion always creates a separate destination tree; it does not recursively rewrite the source rootfs or its metadata.\n\nBoth actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.\n\nBefore modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced-fidelity result. Use `--force` to proceed only when that metadata loss is understood and acceptable.\n\nUnpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host-capability checks complete before *ROOT* is created or modified.",
+      "description": "Unroot currently supports raw root filesystem tar archives. Filesystem entries such as `bin/`, `etc/`, `usr/`, and `var/` must appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Unroot does not currently strip a wrapping directory or import OCI/container-image layouts, disk images, installer media, or distribution-specific bundles. Additional formats may be supported in the future.\n\n`unroot unpack` creates *ROOT* when needed and extracts *ARCHIVE* under a durable ownership model. The default rich mode maps rootfs ID 0 to the invoking user and IDs 1 through 65535 to that user's subordinate UID and GID ranges. `--id-count COUNT` selects a larger or smaller subordinate extent when the archive needs different ownership headroom. *COUNT* excludes rootfs ID 0, so `--id-count 100000` represents logical IDs 0 through 100000. This preserves a conventional multi-user Linux filesystem without requiring host root privileges after the one-time host allocation is configured.\n\n`sudo unroot unpack --native` instead writes archive ownership directly to the host filesystem. Native mode is appropriate for ordinary privileged chroots, disposable VMs, and filesystems that must retain their existing host-visible numeric ownership.\n\nBoth forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. With no `--id-count`, its recorded count is reused; an explicitly conflicting mode or count is rejected.\n\nAfter extraction, `unpack` installs writable copies of the host's `/etc/hosts` and `/etc/resolv.conf` by default. Their portable rootfs originals are preserved for later restoration and packing. See *ROOTFS INJECTIONS* for the complete lifecycle and for `--inject` controls that disable either or both defaults.\n\n`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.\n\nOnly one `pack`, `unpack`, or `inject` operation may manage a rootfs at a time. These actions take an exclusive operating-system lock on the pinned root directory and fail immediately when another rootfs-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. `enter` does not mutate the injection registry and does not require this lock.\n\n`pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:\n\n```console\n$ unroot pack ~/roots/gentoo-rich gentoo.tar.zst\n$ sudo unroot unpack --native gentoo.tar.zst ~/roots/gentoo-native\n```\n\nThe reverse works for a managed native root: run `sudo unroot pack` on that root, then use ordinary `unroot unpack` to create a rich unprivileged copy. Conversion always creates a separate destination tree; it does not recursively rewrite the source rootfs or its metadata.\n\nBoth actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.\n\nUnroot's ACL contract is limited to POSIX ACLs, matching the supported tar metadata path. It does not interpret NFSv4 ACL semantics. Any filesystem-specific representation carried as an extended attribute remains opaque xattr metadata and follows the extended-attribute preservation path.\n\nBefore modifying a rootfs, Unroot opens and pins the input archive and performs a complete metadata inspection. Unsafe paths, the reserved `.unroot` tree, OCI image layouts, malformed archives, and ownership outside the selected ID map are rejected before extraction. When that inspection finds POSIX ACLs or extended attributes, Unroot performs a quick capability check on the exact destination filesystem and rejects an incompatible destination before extraction. This check does not reopen or rescan the archive. Recoverable metadata limitations fail closed by default; use `--force` only when the resulting reduction in archive fidelity is understood and acceptable.\n\nUnpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but structural, ownership, and required destination-capability checks complete before extraction starts.",
       "metadata": {
         "priority": "30"
+      }
+    },
+    "topic:inspection": {
+      "kind": "topic",
+      "name": "inspection",
+      "title": "INSPECTION",
+      "short_help": "INSPECTION",
+      "syntax": "",
+      "description": "`unroot inspect host` reports current kernel, namespace, mapping-helper, host-helper, and archive-engine capabilities without changing a rootfs. Availability, confirmed unavailability, and an inconclusive probe are reported separately. Use `--json` for a structured support report.\n\n`unroot inspect archive ARCHIVE` scans a pinned archive without extracting it. It reports the format and compression filters, member and byte counts, maximum numeric UID and GID, rootfs layout markers, and noteworthy metadata such as ACLs, extended attributes, capabilities, SELinux labels, sparse files, links, devices, FIFOs, and sockets. The same inspection path supplies the mandatory safety and ownership checks used by `unpack`.\n\n```console\n$ unroot inspect host\n$ unroot inspect archive stage3.tar.xz --json\n```",
+      "metadata": {
+        "priority": "35"
+      }
+    },
+    "section:injections": {
+      "kind": "section",
+      "name": "injections",
+      "title": "ROOTFS INJECTIONS",
+      "short_help": "ROOTFS INJECTIONS",
+      "syntax": "",
+      "description": "",
+      "metadata": {
+        "priority": "37"
+      }
+    },
+    "topic:injection-lifecycle": {
+      "kind": "topic",
+      "name": "injection-lifecycle",
+      "title": "Defaults and lifecycle",
+      "short_help": "Defaults and lifecycle",
+      "syntax": "",
+      "description": "`unroot unpack` installs two named injections after creating a managed rootfs: `hosts` copies the host's `/etc/hosts`, and `resolv.conf` copies the host's `/etc/resolv.conf`. The copies are ordinary writable mode-`0644` regular files owned by root inside the rootfs, not bind mounts. This gives a newly unpacked environment working host and DNS configuration without making those files immutable or exposing host inode ownership.\n\nBefore replacing a destination, Unroot preserves its original regular file, symlink, or absence under `ROOT/.unroot/injections/`. That original is captured once. Re-adding an existing injection refreshes the live copy while retaining the same preserved original. Injections remain in place across any number of `enter` commands; `enter` neither applies nor restores them.\n\nDisable defaults while creating a rootfs with a subtractive `--inject` value. A comma-separated value may disable several names, and `-*` disables all current defaults:\n\n```console\n$ unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs\n$ unroot unpack --inject=-hosts,-resolv.conf stage3.tar.xz ~/rootfs\n$ unroot unpack --inject=-* stage3.tar.xz ~/rootfs\n```\n\n`unpack --inject` accepts exclusions only. This keeps rootfs creation predictable; add or alter injections afterward with the `inject` action.",
+      "metadata": {
+        "parent": "section:injections",
+        "priority": "0"
+      }
+    },
+    "topic:injection-management": {
+      "kind": "topic",
+      "name": "injection-management",
+      "title": "Inspecting and managing injections",
+      "short_help": "Inspecting and managing injections",
+      "syntax": "",
+      "description": "The `inject` action operates only on managed root filesystems created by `unroot unpack`; it does not modify unmanaged trees used with `enter --single` or `enter --native`.\n\nList the registered injections in a rootfs, optionally as JSON:\n\n```console\n$ unroot inject list ~/rootfs\n$ unroot inject list ~/rootfs --json\n```\n\nAdd or refresh either built-in by name:\n\n```console\n$ unroot inject add ~/rootfs hosts resolv.conf\n```\n\nCustom items use `SOURCE[:DESTINATION[:UID:GID:MODE]]`. With no destination, the same absolute path is used inside *ROOT*. Ownership defaults to `0:0` and mode to `0644`; overridden IDs are IDs inside the rootfs, and mode is octal:\n\n```console\n$ unroot inject add ~/rootfs /etc/localtime\n$ unroot inject add ~/rootfs /host/config:/etc/example/config:0:0:0600\n```\n\nThe source may be a regular file or a symlink that resolves to one. Directories and special files are rejected. The destination parent must already exist. The destination itself may be a regular file, a symlink, or absent; the live injected node is always a regular file. Host source paths are supplied by the current command and are not stored in the rootfs registry.\n\nRemove registrations by built-in name or absolute destination. Removal restores the preserved regular file or symlink, or removes the live copy when the destination was originally absent. `clear` does this for every registration:\n\n```console\n$ unroot inject remove ~/rootfs hosts /etc/example/config\n$ unroot inject clear ~/rootfs\n```",
+      "metadata": {
+        "parent": "section:injections",
+        "priority": "10"
+      }
+    },
+    "topic:injection-portability": {
+      "kind": "topic",
+      "name": "injection-portability",
+      "title": "Packing and concurrency",
+      "short_help": "Packing and concurrency",
+      "syntax": "",
+      "description": "`unroot pack` does not alter the live rootfs. While creating the archive, it excludes each live injected file and substitutes the preserved original at that path. If the path was originally absent, it remains absent from the archive. Host DNS, host names, and custom injected content therefore do not leak into a portable rootfs archive.\n\nThe injection registry and preserved originals are private Unroot metadata and are excluded from archives. `pack`, `unpack`, and every `inject` operation share one rootfs lock. File installation and replacement are atomic, while ordinary concurrent `enter` operations only observe the current durable files and never perform competing injection cleanup.",
+      "metadata": {
+        "parent": "section:injections",
+        "priority": "20"
       }
     },
     "section:execution-model": {
@@ -75,7 +133,7 @@
       "title": "Environment",
       "short_help": "Environment",
       "syntax": "",
-      "description": "The target command does not inherit the host environment by default. Unroot supplies only a deterministic target `PATH`, which can be replaced along with any other value using repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.\n\nUse `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--persist-env` selections still apply. A bare command cannot be resolved when `PATH` is absent or empty, so use an absolute command in a deliberately pathless environment.",
+      "description": "The target command does not inherit the host environment by default. Unroot supplies a deterministic target `PATH` and, when it is set on the host, preserves `TERM` automatically so interactive terminal programs keep a usable terminal type. `PATH` can be replaced, and any other value can be added, with repeatable `--env KEY=VALUE` options:\n\n```console\n$ unroot enter ~/rootfs --env PATH=/bin:/usr/bin -- make\n```\n\nUse `--persist-env` to select existing host variables by name:\n\n```console\n$ unroot enter ~/rootfs --persist-env TERM,MAKEFLAGS -- /bin/sh\n```\n\nAn explicit `--env` value wins when the same name also appears in `--persist-env`. Names requested through `--persist-env` but absent from the host are ignored.\n\nUse `--no-default-env` to suppress the built-in `PATH`. Explicit `--env` and `--persist-env` selections still apply. A bare command cannot be resolved when `PATH` is absent or empty, so use an absolute command in a deliberately pathless environment.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "20"
@@ -99,7 +157,7 @@
       "title": "Filesystem setup",
       "short_help": "Filesystem setup",
       "syntax": "",
-      "description": "Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `MOUNT FEATURES`. Both rich and native entry retain private mount and PID namespaces.\n\n`--map` bind-mounts an absolute host path at the same absolute path inside the root filesystem. `--map-ro` accepts either *SOURCE* for the same-path shorthand or *SOURCE:DESTINATION* for an explicit destination, and requires the resulting bind mount to be read-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to `enter`.",
+      "description": "Rooted entry prepares a private mount tree, enters *ROOT* with `chroot(2)`, mounts a private `/proc`, and performs the enabled minimal filesystem setup described under `FILESYSTEM SETUP`. Both rich and native entry retain private mount and PID namespaces. *ROOT* must be a distinct root filesystem; `enter` rejects any path that resolves to the host `/`.\n\n`--map` bind-mounts an absolute host path at the same absolute path inside the root filesystem. `--map-ro` accepts either *SOURCE* for the same-path shorthand or *SOURCE:DESTINATION* for an explicit destination, and requires the resulting bind mount to be read-only. Directory mappings also protect nested mounts recursively. Both options may be repeated and apply only to `enter`.",
       "metadata": {
         "parent": "section:execution-model",
         "priority": "40"
@@ -123,7 +181,7 @@
       "title": "SECURITY MODEL",
       "short_help": "SECURITY MODEL",
       "syntax": "",
-      "description": "`unroot` is intended for root filesystems and commands that you trust. It is not a sandbox for hostile code.\n\nRich roots and rooted `--single` use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.\n\nEvery mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.\n\nExplicit bind mappings and selected resolver or device resources remain backed by host resources. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.",
+      "description": "`unroot` is intended for root filesystems and commands that you trust. It is not a sandbox for hostile code.\n\nRich roots and rooted `--single` use a user namespace, so namespace root capabilities do not become host root privileges. Native mode deliberately uses host root and must be requested explicitly for an unmanaged rootfs or recorded in managed metadata. Native foreign execution may add a host-global QEMU registration for the current boot; it uses only an enabled compatible handler or a trusted static system executable and will not overwrite a conflict.\n\nEvery mode creates private mount and PID namespaces. Mount changes remain private to the process tree. Unroot deliberately shares the host network, IPC namespace, hostname, cgroup hierarchy, kernel, and available hardware interfaces. It does not install a syscall filter, impose resource limits, or create an AppArmor or SELinux policy.\n\nExplicit bind mappings and device resources remain backed by host resources. Managed resolver and hosts injections are copied from trusted host files and remain ordinary writable rootfs files while active. `UNROOT_FEATURES=+devbind` exposes the complete host `/dev` tree and should be enabled only when that access is intended.",
       "metadata": {
         "priority": "50"
       }
@@ -169,7 +227,7 @@
       "title": "--force",
       "short_help": "--force",
       "syntax": "--force",
-      "description": "Allow `pack` or `unpack` to continue when the host GNU tar reports that requested extended filesystem metadata cannot be preserved. The capability warning is still displayed. This option does not override tar execution errors.",
+      "description": "Allow `pack` or `unpack` to continue after a recoverable libarchive metadata warning or a reported destination metadata limitation. The warning is still displayed. This option does not override unsafe archive structure, ownership-map violations, corrupt data, or archive-engine failures.",
       "metadata": {
         "parent": "section:options",
         "priority": "15"
@@ -259,6 +317,18 @@
         "priority": "60"
       }
     },
+    "option:unpack.inject": {
+      "kind": "option",
+      "name": "unpack.inject",
+      "title": "--inject EXCLUSIONS",
+      "short_help": "--inject EXCLUSIONS",
+      "syntax": "--inject EXCLUSIONS",
+      "description": "Disable one or more default injections during `unpack`. Accepts `-hosts`, `-resolv.conf`, a comma-separated combination, or `-*` for all defaults. Use the equals form, such as `--inject=-hosts` or `--inject=-hosts,-resolv.conf`, so a negative value is not mistaken for an option. May be repeated. Positive and custom injection specifications belong to `unroot inject add`.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "62"
+      }
+    },
     "option:enter.emulation": {
       "kind": "option",
       "name": "enter.emulation",
@@ -334,8 +404,8 @@
     "section:mount-features": {
       "kind": "section",
       "name": "mount-features",
-      "title": "MOUNT FEATURES",
-      "short_help": "MOUNT FEATURES",
+      "title": "FILESYSTEM SETUP",
+      "short_help": "FILESYSTEM SETUP",
       "syntax": "",
       "description": "",
       "metadata": {
@@ -348,34 +418,10 @@
       "title": "Feature selection",
       "short_help": "Feature selection",
       "syntax": "",
-      "description": "`UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.\n\nRooted mode enables `resolvconf`, `hosts`, `devpts`, `shm`, `run`, and `mtab` by default. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.\n\nFor example, this disables resolver sharing and enables the full device bind:\n\n```console\n$ UNROOT_FEATURES=-resolvconf,+devbind unroot enter ~/rootfs\n```",
+      "description": "`UNROOT_FEATURES` adjusts filesystem setup with a comma-separated list of feature names. Prefix a name with `-` to disable it or `+` to enable it. `-*` disables all optional features before later tokens are applied.\n\nRooted mode enables `sys`, `devpts`, `shm`, `run`, and `mtab` by default. `/sys` is a recursive read-only bind of the host sysfs so topology and hardware-discovery tools can inspect the running machine without gaining a writable control surface. `/proc` is always mounted privately and cannot be disabled. `devbind` is disabled by default.\n\nBind mounts retain the host source's inode ownership and permissions. In rootless modes, host IDs outside the namespace map appear as the overflow `nobody` identity, and namespace root does not gain host-root access. The `/proc` mount point itself may similarly display overflow ownership because of its kernel-provided root inode; namespaced process entries such as `/proc/self/status` still report the mapped process identity.\n\nFor example, this disables the private shared-memory mount and enables the full device bind:\n\n```console\n$ UNROOT_FEATURES=-shm,+devbind unroot enter ~/rootfs\n```",
       "metadata": {
         "parent": "section:mount-features",
         "priority": "0"
-      }
-    },
-    "feature:resolvconf": {
-      "kind": "feature",
-      "name": "resolvconf",
-      "title": "resolvconf",
-      "short_help": "resolvconf",
-      "syntax": "resolvconf",
-      "description": "Bind the host `/etc/resolv.conf` into the root filesystem.",
-      "metadata": {
-        "parent": "section:mount-features",
-        "priority": "10"
-      }
-    },
-    "feature:hosts": {
-      "kind": "feature",
-      "name": "hosts",
-      "title": "hosts",
-      "short_help": "hosts",
-      "syntax": "hosts",
-      "description": "Bind the host `/etc/hosts` into the root filesystem.",
-      "metadata": {
-        "parent": "section:mount-features",
-        "priority": "20"
       }
     },
     "feature:devpts": {
@@ -387,7 +433,19 @@
       "description": "Mount a private `/dev/pts` for pseudo-terminal support.",
       "metadata": {
         "parent": "section:mount-features",
-        "priority": "30"
+        "priority": "20"
+      }
+    },
+    "feature:sys": {
+      "kind": "feature",
+      "name": "sys",
+      "title": "sys",
+      "short_help": "sys",
+      "syntax": "sys",
+      "description": "Bind the host `/sys` into *ROOT* as a recursive read-only mount.",
+      "metadata": {
+        "parent": "section:mount-features",
+        "priority": "25"
       }
     },
     "feature:shm": {
@@ -399,7 +457,7 @@
       "description": "Mount a private `tmpfs` at `/dev/shm`.",
       "metadata": {
         "parent": "section:mount-features",
-        "priority": "40"
+        "priority": "30"
       }
     },
     "feature:run": {
@@ -411,7 +469,7 @@
       "description": "Mount a private `tmpfs` at `/run`.",
       "metadata": {
         "parent": "section:mount-features",
-        "priority": "50"
+        "priority": "40"
       }
     },
     "feature:mtab": {
@@ -423,7 +481,7 @@
       "description": "Create `/etc/mtab` as a link to `/proc/self/mounts` when it is absent.",
       "metadata": {
         "parent": "section:mount-features",
-        "priority": "60"
+        "priority": "50"
       }
     },
     "feature:devbind": {
@@ -435,7 +493,7 @@
       "description": "Bind the complete host `/dev` tree into the root filesystem.",
       "metadata": {
         "parent": "section:mount-features",
-        "priority": "70"
+        "priority": "60"
       }
     },
     "topic:diagnostics": {
@@ -455,7 +513,7 @@
       "title": "EXIT STATUS",
       "short_help": "EXIT STATUS",
       "syntax": "",
-      "description": "After successful setup, `unroot` returns the target command's exit status. Commands terminated by a signal use the conventional `128 + signal` result. `pack` and `unpack` return GNU tar's result after namespace setup. Argument, namespace, ownership, mount, archive, emulation, and execution setup failures return a nonzero status with a diagnostic on standard error.",
+      "description": "After successful setup, `unroot` returns the target command's exit status. Commands terminated by a signal use the conventional `128 + signal` result. `pack` and `unpack` return the archive helper's result after namespace setup. Argument, namespace, ownership, mount, archive, emulation, and execution setup failures return a nonzero status with a diagnostic on standard error.",
       "metadata": {
         "priority": "90"
       }
@@ -466,7 +524,7 @@
       "title": "REQUIREMENTS",
       "short_help": "REQUIREMENTS",
       "syntax": "",
-      "description": "Rooted `--single` and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer-container policy.\n\nRich ownership additionally requires `unroot-util` installed beside `unroot`, `/usr/bin/newuidmap`, `/usr/bin/newgidmap`, and a subordinate UID and GID allocation from the host's configured provider. Builds without libsubid support use `/etc/subuid` and `/etc/subgid` directly.\n\nNative ownership requires host root privileges and Linux mount and PID namespace support. `--map-ro` additionally requires `mount_setattr(2)`, available in Linux 5.12 or newer.\n\nPrivate foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.\n\n`pack` and `unpack` require GNU tar on the host `PATH`. Compressed output also requires the corresponding compression program selected by the archive suffix.",
+      "description": "Rooted `--single` and rich rootfs entry require Linux with unprivileged user namespaces enabled by the kernel and permitted by the active AppArmor, SELinux, seccomp, and outer-container policy.\n\nRich ownership additionally requires `unroot-util` installed beside `unroot`, `/usr/bin/newuidmap`, `/usr/bin/newgidmap`, and a subordinate UID and GID allocation from the host's configured provider. Builds without libsubid support use `/etc/subuid` and `/etc/subgid` directly.\n\nNative ownership requires host root privileges and Linux mount and PID namespace support. `--map-ro` additionally requires `mount_setattr(2)`, available in Linux 5.12 or newer.\n\nPrivate foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.\n\nArchive inspection, `pack`, and `unpack` require a libarchive-enabled `unroot-util` installed beside `unroot`. Distribution packages provide the matching host library dependency. Source builds report archive support as unavailable when libarchive development files were absent while building the helper.\n\nAdding, removing, or clearing injections also requires the sibling `unroot-util`; it performs mapped file installation and restoration under the ownership policy selected by the static engine. Listing the registry does not modify the rootfs.",
       "metadata": {
         "priority": "100"
       }
@@ -488,7 +546,7 @@
       "title": "ROOT/.unroot/meta.json",
       "short_help": "ROOT/.unroot/meta.json",
       "syntax": "ROOT/.unroot/meta.json",
-      "description": "Authoritative per-rootfs ownership and execution metadata maintained by `unroot`. Unmanaged `enter --native` does not create it.",
+      "description": "Authoritative per-rootfs ownership and execution metadata maintained by `unroot`. Unmanaged `enter --single` and `enter --native` do not create it.",
       "metadata": {
         "parent": "section:files",
         "priority": "10"
@@ -504,6 +562,18 @@
       "metadata": {
         "parent": "section:files",
         "priority": "20"
+      }
+    },
+    "file:injection-registry": {
+      "kind": "file",
+      "name": "injection-registry",
+      "title": "ROOT/.unroot/injections/",
+      "short_help": "ROOT/.unroot/injections/",
+      "syntax": "ROOT/.unroot/injections/",
+      "description": "Private registry and preserved originals for durable rootfs injections. This tree is never included directly in a packed rootfs; `pack` substitutes each preserved original at its portable path.",
+      "metadata": {
+        "parent": "section:files",
+        "priority": "30"
       }
     },
     "file:root-bin": {
@@ -570,6 +640,27 @@
     {
       "tag": "topic:rootfs-archives",
       "children": []
+    },
+    {
+      "tag": "topic:inspection",
+      "children": []
+    },
+    {
+      "tag": "section:injections",
+      "children": [
+        {
+          "tag": "topic:injection-lifecycle",
+          "children": []
+        },
+        {
+          "tag": "topic:injection-management",
+          "children": []
+        },
+        {
+          "tag": "topic:injection-portability",
+          "children": []
+        }
+      ]
     },
     {
       "tag": "section:execution-model",
@@ -644,6 +735,10 @@
           "children": []
         },
         {
+          "tag": "option:unpack.inject",
+          "children": []
+        },
+        {
           "tag": "option:enter.emulation",
           "children": []
         },
@@ -677,15 +772,11 @@
           "children": []
         },
         {
-          "tag": "feature:resolvconf",
-          "children": []
-        },
-        {
-          "tag": "feature:hosts",
-          "children": []
-        },
-        {
           "tag": "feature:devpts",
+          "children": []
+        },
+        {
+          "tag": "feature:sys",
           "children": []
         },
         {
@@ -731,6 +822,10 @@
         },
         {
           "tag": "file:root-bin",
+          "children": []
+        },
+        {
+          "tag": "file:injection-registry",
           "children": []
         },
         {

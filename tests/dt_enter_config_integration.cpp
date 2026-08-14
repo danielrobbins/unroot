@@ -26,35 +26,58 @@ TEST_CASE("EnterConfig integration: ROOT plus trailing command via --") {
     REQUIRE(cfg.shell.size() == 2);
     CHECK(cfg.shell[0] == "/bin/echo");
     CHECK(cfg.shell[1] == "hello");
-    REQUIRE(cfg.envVars.size() == 1);
-    CHECK(cfg.envVars[0].first == "PATH");
-    CHECK(cfg.envVars[0].second ==
+    auto path = std::find_if(cfg.envVars.begin(), cfg.envVars.end(),
+        [](const auto& value) { return value.first == "PATH"; });
+    REQUIRE(path != cfg.envVars.end());
+    CHECK(path->second ==
         "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
 }
-
 TEST_CASE("EnterConfig environment precedence is explicit, persisted, default") {
     EnterConfig persisted;
     ToBeParsedArgs persistedArgs;
     persistedArgs.args = {"/rootfs", "--persist-env", "PATH", "--", "/bin/true"};
     persisted.parse(persistedArgs);
-    REQUIRE(persisted.envVars.size() == 1);
-    CHECK(persisted.envVars[0].first == "PATH");
-    CHECK(persisted.envVars[0].second == ::getenv("PATH"));
+    auto persistedPath = std::find_if(persisted.envVars.begin(), persisted.envVars.end(),
+        [](const auto& value) { return value.first == "PATH"; });
+    REQUIRE(persistedPath != persisted.envVars.end());
+    CHECK(persistedPath->second == ::getenv("PATH"));
 
     EnterConfig explicitValue;
     ToBeParsedArgs explicitArgs;
     explicitArgs.args = {"/rootfs", "--persist-env", "PATH", "--env", "PATH=/target/path",
                          "--", "/bin/true"};
     explicitValue.parse(explicitArgs);
-    REQUIRE(explicitValue.envVars.size() == 1);
-    CHECK(explicitValue.envVars[0].first == "PATH");
-    CHECK(explicitValue.envVars[0].second == "/target/path");
+    auto explicitPath = std::find_if(explicitValue.envVars.begin(), explicitValue.envVars.end(),
+        [](const auto& value) { return value.first == "PATH"; });
+    REQUIRE(explicitPath != explicitValue.envVars.end());
+    CHECK(explicitPath->second == "/target/path");
 
     EnterConfig empty;
     ToBeParsedArgs emptyArgs;
     emptyArgs.args = {"/rootfs", "--no-default-env", "--", "/bin/true"};
     empty.parse(emptyArgs);
-    CHECK(empty.envVars.empty());
+    REQUIRE(empty.envVars.size() <= 1);
+    if (!empty.envVars.empty()) {
+        CHECK(empty.envVars[0].first == "TERM");
+        CHECK(empty.envVars[0].second == ::getenv("TERM"));
+    }
+}
+
+TEST_CASE("EnterConfig automatically preserves TERM when available") {
+    const char* term = ::getenv("TERM");
+    EnterConfig cfg;
+    ToBeParsedArgs args;
+    args.args = {"/rootfs", "--", "/bin/true"};
+    cfg.parse(args);
+
+    auto item = std::find_if(cfg.envVars.begin(), cfg.envVars.end(),
+        [](const auto& value) { return value.first == "TERM"; });
+    if (term && *term) {
+        REQUIRE(item != cfg.envVars.end());
+        CHECK(item->second == term);
+    } else {
+        CHECK(item == cfg.envVars.end());
+    }
 }
 
 TEST_CASE("EnterConfig integration: implicit trailing without -- is collected when allowed") {
@@ -95,7 +118,7 @@ TEST_CASE("EnterConfig integration: ROOT is required") {
 TEST_CASE("EnterConfig accepts explicit foreign execution controls") {
     EnterConfig cfg;
     ToBeParsedArgs tpa;
-    tpa.args = {"/", "--qemu", "/usr/bin/qemu-aarch64-static",
+    tpa.args = {"/tmp", "--qemu", "/usr/bin/qemu-aarch64-static",
                 "--qemu-cpu", "max,sve=on,sve256=on", "--", "/bin/sh"};
     cfg.parse(tpa);
     cfg.validate();
@@ -112,7 +135,7 @@ TEST_CASE("EnterConfig validates the emulation policy") {
 
     EnterConfig disabled;
     ToBeParsedArgs never;
-    never.args = {"/", "--emulation", "never", "--", "/bin/sh"};
+    never.args = {"/tmp", "--emulation", "never", "--", "/bin/sh"};
     disabled.parse(never);
     disabled.validate();
     CHECK(disabled.emulationPolicy == emulation::Policy::Never);
@@ -121,7 +144,7 @@ TEST_CASE("EnterConfig validates the emulation policy") {
 TEST_CASE("EnterConfig rejects contradictory emulation controls") {
     EnterConfig cfg;
     ToBeParsedArgs tpa;
-    tpa.args = {"/", "--emulation", "never", "--qemu-cpu", "qemu64",
+    tpa.args = {"/tmp", "--emulation", "never", "--qemu-cpu", "qemu64",
                 "--", "/bin/sh"};
     cfg.parse(tpa);
     REQUIRE_THROWS_AS(cfg.validate(), AppException);

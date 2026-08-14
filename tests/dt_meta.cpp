@@ -44,6 +44,7 @@ TEST_CASE("rootfs metadata persists the exact kernel ID map") {
     CHECK(json["version"] == "unroot.meta/v1");
     CHECK(json["idmap"]["uid_map"][1]["outside"] == 100000);
     CHECK(json["idmap"]["gid_map"][1]["outside"] == 200000);
+    CHECK_FALSE(json.contains("injections"));
 }
 
 TEST_CASE("rootfs metadata persists a larger rich ID map") {

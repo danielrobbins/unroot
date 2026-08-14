@@ -14,6 +14,7 @@ branch.
 - `unroot unpack ARCHIVE ROOT`
 - `sudo unroot unpack --native ARCHIVE ROOT`
 - `unroot pack ROOT ARCHIVE [OPTIONS]`
+- `unroot inject list|add|remove|clear ROOT [ITEM...]`
 - durable rich subordinate UID and GID mappings for multi-user ownership,
   persisted per rootfs and revalidated before every entry;
 - native host ownership for privileged chroots, existing root filesystems, and
@@ -26,10 +27,11 @@ branch.
   for native foreign roots;
 - full-metadata tar extraction and capture under the durable ownership model;
 - explicit working-directory and environment configuration;
-- automatic minimal `/proc`, `/dev`, and resolver setup;
+- automatic minimal `/proc` and `/dev` setup, plus durable writable host and
+  resolver file injections for managed roots;
 - child standard I/O and exit-status propagation; and
-- a static namespace engine plus a narrow host-linked helper used only for rich
-  subordinate-ID discovery and validation.
+- a static namespace engine plus a narrow host-linked helper for the host's
+  subordinate-ID provider, libarchive, and mapped rootfs file operations.
 
 The ownership modes are not fallbacks for one another. A failed rich setup must
 not collapse a multi-user rootfs into one identity, and an unprivileged request

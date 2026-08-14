@@ -11,6 +11,7 @@
 #include "../arch.hpp"
 #include "../shebang.hpp"
 #include "util/path.hpp"
+#include "util/rootfs.hpp"
 #include <cstdlib>
 #include <algorithm>
 #include <stdexcept>
@@ -23,7 +24,6 @@ namespace {
 constexpr const char* defaultPath =
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 }
-
 // Virtual configure pattern implementation for EnterConfig
 void EnterConfig::configure_parser() {
     ActionConfig::configure_parser();
@@ -188,6 +188,18 @@ void EnterConfig::validateRootfs() const {
         throw AppException(util::make_error(util::LibErr::Invalid, 0, 
             std::string("root path does not exist: ") + root), "usage");
     }
+
+    util::Rootfs candidate(root);
+    if (!candidate)
+        throw AppException(util::make_error(
+            util::LibErr::Invalid, 0,
+            std::string("root path is not an accessible directory: ") + root),
+            "usage");
+    if (candidate.isHostRoot())
+        throw AppException(util::make_error(
+            util::LibErr::Invalid, 0,
+            "enter ROOT must name a distinct root filesystem; ROOT resolves to host /"),
+            "usage");
 }
 
 void EnterConfig::validateNamespace() const {
@@ -246,6 +258,13 @@ void EnterConfig::resolveEnvironment() {
         return std::any_of(envVars.begin(), envVars.end(),
             [&](const auto& value) { return value.first == key; });
     };
+
+    if (!hasKey("TERM")) {
+        const char* term = ::getenv("TERM");
+        if (term && *term) {
+            envVars.emplace_back("TERM", std::string(term));
+        }
+    }
 
     if (!persistEnvNames.empty()) {
         for (const auto& name : persistEnvNames) {

@@ -23,12 +23,14 @@ pytestmark = [
 
 def test_restricted_user_namespace_reports_classified_failure(
     unroot: UnrootRunner,
+    tmp_path: Path,
 ) -> None:
     if os.environ.get("UNROOT_E2E_USERNS_POLICY") != "restricted":
         pytest.skip("requires an explicitly restricted user-namespace policy")
 
+    root = create_rootfs(tmp_path / "root")
     result = unroot.run(
-        "enter", "--single", "/", "--", "/usr/bin/id", "-u"
+        "enter", "--single", str(root), "--", "/bin/true"
     )
 
     assert result.returncode not in {-signal.SIGPIPE, 128 + signal.SIGPIPE}, (

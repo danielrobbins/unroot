@@ -4,8 +4,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        acl \
         build-essential \
         busybox-static \
+        libarchive-dev \
         libsubid-dev \
         python3-pytest \
         uidmap \
@@ -21,4 +23,4 @@ USER unroot
 ENV HOME=/home/unroot
 
 COPY --chown=unroot:unroot . .
-RUN make clean cli test UNROOT_UTIL_LIBSUBID=1
+RUN make clean cli test UNROOT_UTIL_LIBARCHIVE=1 UNROOT_UTIL_LIBSUBID=1

@@ -31,6 +31,9 @@ exercised through the shipped Unroot executable. The suite verifies:
   changes, implicit map reuse, and refusal of stale or conflicting mappings;
 - exclusive archive-operation locking, automatic process-exit release, and
   root-path replacement detection;
+- default and custom injection registration, refresh, restoration, portable
+  archive substitution, all-target restoration preflight, nonblocking
+  special-source rejection, and destination type validation;
 - managed rich entry and privileged native ownership and entry;
 - working-directory and environment propagation;
 - rooted `PATH` command lookup;
@@ -60,6 +63,15 @@ the corresponding `_ARCH` variables. CI pins the archives and verifies their
 SHA-256 checksums before pytest starts. Release cells require the
 `rootfs_journey` capability; ordinary local runs skip either role whose fixture
 is not configured.
+
+The separate `Funtoo Heritage Qualification` workflow runs weekly and on
+manual dispatch. It pins the final Raspberry Pi 4 and SiFive Freedom U740
+Funtoo stage3 archives by exact URL and SHA-256 checksum, then qualifies an
+x86-64 host entering ARM64 and RISC-V roots. Each journey verifies the stage's
+toolchain identity, `/proc`, pseudo-terminal allocation, DNS configuration,
+target-native compilation and execution, non-root ownership, and a complete
+pack and restore cycle. These larger historical fixtures complement the fast
+Alpine matrix without adding nearly one gigabyte of downloads to every push.
 
 The harness removes inherited `UNROOT_*` settings, supplies a deliberately
 failing `UNROOT_SUDO` helper, captures stdout and stderr, and kills the complete
@@ -105,11 +117,13 @@ sysctls and an enforcing SELinux context when those facts are visible.
 
 Runs the unit and end-to-end suites. This is the local release gate.
 
-CI builds `unroot-util` against libsubid on Ubuntu and verifies both allocation
-selection and exact recorded-range validation before rich-ID E2E uses that
-provider-aware path. A separate Alpine job builds and executes the helper
-against musl with the direct-file backend. The static `unroot` binary is checked
-independently and must not acquire a dynamic interpreter.
+CI builds `unroot-util` against libsubid and libarchive on Ubuntu and verifies
+both allocation selection and exact recorded-range validation before rich-ID
+E2E uses that provider-aware path. The archive suite exercises the same helper
+for inspection, packing, and extraction. A separate Alpine job builds and
+executes the helper against musl with the direct-file subordinate-ID backend
+and libarchive enabled. The static `unroot` binary is checked independently and
+must not acquire a dynamic interpreter.
 
 Coverage helpers remain available as `make doctest-coverage`,
 `make doctest-coverage-all`, and `make doctest-diff-coverage`.
