@@ -617,6 +617,26 @@ def test_child_exit_status_propagates(
     assert result.returncode == 37, result.diagnostic()
 
 
+def test_command_help_arguments_cross_the_separator_unchanged(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        '[ "$1" = --help ] && [ "$2" = -h ] && exit 37',
+        "sh",
+        "--help",
+        "-h",
+    )
+
+    assert result.returncode == 37, result.diagnostic()
+    assert "Usage: unroot enter" not in result.stdout
+
+
 @pytest.mark.parametrize(
     "status",
     [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 201],

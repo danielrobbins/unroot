@@ -32,9 +32,10 @@ bool ToBeParsedArgs::is_global_help() const {
 }
 
 bool ToBeParsedArgs::is_action_help() const {
-    return action_name.has_value() &&
-           (std::find(args.begin(), args.end(), "--help") != args.end() ||
-            std::find(args.begin(), args.end(), "-h") != args.end());
+    if (!action_name.has_value()) return false;
+    const auto end = std::find(args.begin(), args.end(), "--");
+    return std::find(args.begin(), end, "--help") != end ||
+           std::find(args.begin(), end, "-h") != end;
 }
 
 std::string ToBeParsedArgs::to_string() const {
