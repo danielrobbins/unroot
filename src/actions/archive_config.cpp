@@ -36,7 +36,7 @@ void PackConfig::configure_parser() {
   ActionConfig::configure_parser();
   parser_
       .add_flag_meta(
-          {"--force"}, "Continue when GNU tar cannot preserve all metadata",
+          {"--force"}, "Accept recoverable archive metadata warnings",
           [this]() { force = true; })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
       .add_positional_meta("ROOT", "Mapped root filesystem to archive",
@@ -71,7 +71,7 @@ void UnpackConfig::configure_parser() {
           "Preserve host-native ownership instead of using subordinate IDs",
           [this]() { native = true; })
       .add_flag_meta(
-          {"--force"}, "Continue when GNU tar cannot preserve all metadata",
+          {"--force"}, "Accept recoverable archive metadata warnings",
           [this]() { force = true; })
       .add_option_meta(
           {"--id-count"}, "<count>",

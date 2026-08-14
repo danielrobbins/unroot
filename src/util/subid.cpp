@@ -1,27 +1,15 @@
 #include "subid.hpp"
 
 #include "util/idmap.hpp"
-#include "util/fd.hpp"
+#include "util/host_helper.hpp"
 
-#include <cerrno>
 #include <climits>
-#include <filesystem>
 #include <sstream>
 #include <string>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 namespace util {
 namespace {
-
-std::string siblingHelper() {
-    char path[PATH_MAX];
-    ssize_t length = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
-    if (length < 0) return {};
-    path[length] = '\0';
-    return (std::filesystem::path(path).parent_path() / "unroot-util").string();
-}
 
 std::string trim(std::string text) {
     const auto first = text.find_first_not_of(" \t\r\n");
@@ -58,69 +46,19 @@ SubIdResult parseResponse(const std::string& output) {
 
 SubIdResult runHelper(const std::vector<std::string>& arguments,
                       const std::string& helperPath) {
-    const std::string helper = helperPath.empty() ? siblingHelper() : helperPath;
-    if (helper.empty() || ::access(helper.c_str(), X_OK) != 0) {
-        return {{}, "error: rich ID mapping requires unroot-util installed next to unroot"};
+    auto response = runHostHelper(arguments, 4096, helperPath);
+    std::string captured = trim(std::move(response.output));
+    if (!response.error.empty()) {
+        if (response.error == "unroot-util is not installed next to unroot")
+            return {{}, "error: rich ID mapping requires unroot-util installed next to unroot"};
+        return {{}, "error: " + response.error};
     }
-
-    int output[2];
-    if (::pipe(output) != 0) {
-        return {{}, "error: unable to communicate with unroot-util"};
-    }
-    UniqueFd readEnd(output[0]);
-    UniqueFd writeEnd(output[1]);
-
-    pid_t child = ::fork();
-    if (child == 0) {
-        readEnd.reset();
-        int fd = writeEnd.release();
-        if ((fd != STDOUT_FILENO && ::dup2(fd, STDOUT_FILENO) < 0) ||
-            (fd != STDERR_FILENO && ::dup2(fd, STDERR_FILENO) < 0)) {
-            _exit(126);
-        }
-        if (fd > STDERR_FILENO) ::close(fd);
-        std::vector<char*> argv;
-        argv.reserve(arguments.size() + 1);
-        for (const auto& argument : arguments)
-            argv.push_back(const_cast<char*>(argument.c_str()));
-        argv.push_back(nullptr);
-        ::execv(helper.c_str(), argv.data());
-        _exit(127);
-    }
-    writeEnd.reset();
-    if (child < 0) return {{}, "error: unable to start unroot-util"};
-
-    std::string captured;
-    bool truncated = false;
-    char buffer[512];
-    while (true) {
-        ssize_t length = ::read(readEnd.get(), buffer, sizeof(buffer));
-        if (length < 0 && errno == EINTR) continue;
-        if (length <= 0) break;
-        constexpr size_t limit = 4096;
-        size_t available = captured.size() < limit ? limit - captured.size() : 0;
-        size_t append = static_cast<size_t>(length);
-        if (append > available) {
-            append = available;
-            truncated = true;
-        }
-        captured.append(buffer, append);
-    }
-    readEnd.reset();
-
-    int status = 0;
-    pid_t waited;
-    do {
-        waited = ::waitpid(child, &status, 0);
-    } while (waited < 0 && errno == EINTR);
-    if (waited != child) return {{}, "error: unable to wait for unroot-util"};
-
-    captured = trim(captured);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        if (!captured.empty() && !truncated) return {{}, captured};
+    if (response.code != 0) {
+        if (!captured.empty() && !response.truncated) return {{}, captured};
         return {{}, "error: unroot-util failed to resolve rich ID mapping"};
     }
-    if (truncated) return {{}, "error: oversized response from unroot-util"};
+    if (response.truncated)
+        return {{}, "error: oversized response from unroot-util"};
     return parseResponse(captured);
 }
 
@@ -133,7 +71,7 @@ SubIdResult querySubIdAllocation(unsigned int requestedCount,
                         std::to_string(MaxRichIdCount)};
     }
 
-    auto result = runHelper({"unroot-util", "idmap", "--count",
+    auto result = runHelper({"idmap", "--count",
                              std::to_string(requestedCount)}, helperPath);
     if (result && result.allocation.count != requestedCount)
         return {{}, "error: invalid response from unroot-util"};
@@ -148,7 +86,7 @@ SubIdResult validateSubIdAllocation(const SubIdAllocation& allocation,
         return {{}, "error: recorded rich ID allocation is invalid"};
     }
     auto result = runHelper(
-        {"unroot-util", "idmap", "--validate",
+        {"idmap", "--validate",
          std::to_string(allocation.uidStart),
          std::to_string(allocation.gidStart),
          std::to_string(allocation.count)}, helperPath);

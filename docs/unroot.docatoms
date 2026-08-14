@@ -29,6 +29,8 @@ unroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 sudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot pack ROOT ARCHIVE
+unroot inspect host [--json]
+unroot inspect archive ARCHIVE [--json]
 ```
 
 == @topic quick-start: QUICK START [priority=20]
@@ -85,7 +87,7 @@ Unroot currently supports raw root filesystem tar archives. Filesystem entries s
 
 Both forms write the selected mode and, for rich roots, the exact kernel UID and GID extents to `ROOT/.unroot/meta.json`. Existing metadata is authoritative when unpacking into an otherwise empty initialized rootfs. With no `--id-count`, its recorded count is reused; an explicitly conflicting mode or count is rejected.
 
-`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use GNU tar from the host; neither a shell nor tar needs to exist inside *ROOT*. Destination suffixes select common compression formats such as `.gz`, `.xz`, and `.zst`.
+`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.
 
 Only one archive operation may use a rootfs at a time. `pack` and `unpack` take an exclusive operating-system lock on the pinned root directory and fail immediately when another archive operation is active. Process exit automatically releases the lock, with no lock file to become stale.
 
@@ -100,9 +102,20 @@ The reverse works for a managed native root: run `sudo unroot pack` on that root
 
 Both actions preserve numeric ownership, permissions, timestamps, symbolic and hard links, sparse files, POSIX ACLs, and extended attributes including file capabilities. SELinux labels are included when SELinux is active. The host-specific top-level `.unroot` tree is excluded from output archives, and an input archive containing that reserved tree is rejected.
 
-Before modifying an archive or rootfs, Unroot verifies that the host GNU tar can preserve the requested extended metadata. A tar build without ACL, xattr, or active SELinux support is rejected rather than silently producing a reduced-fidelity result. Use `--force` to proceed only when that metadata loss is understood and acceptable.
+Before modifying a rootfs, Unroot opens and pins the input archive and performs a complete metadata inspection. Unsafe paths, the reserved `.unroot` tree, OCI image layouts, malformed archives, and ownership outside the selected ID map are rejected before extraction. Recoverable libarchive metadata warnings fail closed by default; use `--force` only when the resulting reduction in archive fidelity is understood and acceptable.
 
-Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but ownership and host-capability checks complete before *ROOT* is created or modified.
+Unpacking is intentionally not an overlay operation: *ROOT* must be new or empty apart from valid `.unroot` metadata. A failed extraction may leave a partially populated rootfs for inspection or removal, but structural, ownership, and host-capability checks complete before extraction starts.
+
+== @topic inspection: INSPECTION [priority=35]
+
+`unroot inspect host` reports current kernel, namespace, mapping-helper, host-helper, and archive-engine capabilities without changing a rootfs. Availability, confirmed unavailability, and an inconclusive probe are reported separately. Use `--json` for a structured support report.
+
+`unroot inspect archive ARCHIVE` scans a pinned archive without extracting it. It reports the format and compression filters, member and byte counts, maximum numeric UID and GID, rootfs layout markers, and noteworthy metadata such as ACLs, extended attributes, capabilities, SELinux labels, sparse files, links, devices, FIFOs, and sockets. The same inspection path supplies the mandatory safety and ownership checks used by `unpack`.
+
+```console
+$ unroot inspect host
+$ unroot inspect archive stage3.tar.xz --json
+```
 
 == @section execution-model: EXECUTION MODEL [priority=40]
 
@@ -198,7 +211,7 @@ Enter an unmanaged host-owned rootfs, or create a native rootfs with `unpack`. R
 
 @syntax --force
 
-Allow `pack` or `unpack` to continue when the host GNU tar reports that requested extended filesystem metadata cannot be preserved. The capability warning is still displayed. This option does not override tar execution errors.
+Allow `pack` or `unpack` to continue after a recoverable libarchive metadata warning. The warning is still displayed. This option does not override unsafe archive structure, ownership-map violations, corrupt data, or archive-engine failures.
 
 == @option unpack.id-count: --id-count COUNT [parent=section:options, priority=17]
 
@@ -348,7 +361,7 @@ Use the global `--debug` option for detailed structured setup events.
 
 == @topic exit-status: EXIT STATUS [priority=90]
 
-After successful setup, `unroot` returns the target command's exit status. Commands terminated by a signal use the conventional `128 + signal` result. `pack` and `unpack` return GNU tar's result after namespace setup. Argument, namespace, ownership, mount, archive, emulation, and execution setup failures return a nonzero status with a diagnostic on standard error.
+After successful setup, `unroot` returns the target command's exit status. Commands terminated by a signal use the conventional `128 + signal` result. `pack` and `unpack` return the archive helper's result after namespace setup. Argument, namespace, ownership, mount, archive, emulation, and execution setup failures return a nonzero status with a diagnostic on standard error.
 
 == @topic requirements: REQUIREMENTS [priority=100]
 
@@ -360,7 +373,7 @@ Native ownership requires host root privileges and Linux mount and PID namespace
 
 Private foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.
 
-`pack` and `unpack` require GNU tar on the host `PATH`. Compressed output also requires the corresponding compression program selected by the archive suffix.
+Archive inspection, `pack`, and `unpack` require a libarchive-enabled `unroot-util` installed beside `unroot`. Distribution packages provide the matching host library dependency. Source builds report archive support as unavailable when libarchive development files were absent while building the helper.
 
 == @section files: FILES [priority=110]
 

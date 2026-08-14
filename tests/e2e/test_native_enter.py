@@ -33,6 +33,7 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     assert "--debug" in global_help.stdout
     assert "pack ROOT ARCHIVE" in global_help.stdout
     assert "unpack ARCHIVE ROOT" in global_help.stdout
+    assert "inspect SUBJECT" in global_help.stdout
     assert "prepare" not in global_help.stdout
 
     enter_help = unroot.run("enter", "--help").assert_ok()
@@ -54,6 +55,22 @@ def test_public_help_surface(unroot: UnrootRunner) -> None:
     unpack_help = unroot.run("unpack", "--help").assert_ok()
     assert "unpack ARCHIVE ROOT" in unpack_help.stdout
     assert "--native" in unpack_help.stdout
+    inspect_help = unroot.run("inspect", "--help").assert_ok()
+    assert "inspect SUBJECT" in inspect_help.stdout
+    assert "--json" in inspect_help.stdout
+
+
+def test_inspect_host_reports_runtime_capabilities(unroot: UnrootRunner) -> None:
+    result = unroot.run("inspect", "host", "--json").assert_ok()
+    report = json.loads(result.stdout)
+
+    assert report["kernel"]["release"]
+    assert report["kernel"]["machine"]
+    assert report["namespaces"]["user"]["status"] in {
+        "available", "unavailable", "unknown",
+    }
+    assert report["helpers"]["unroot_util"]["status"] == "available"
+    assert report["archives"]["libarchive"]["status"] == "available"
 
 @pytest.mark.parametrize("arguments", [("unknown-action",), ("unknown-action", "--help")])
 def test_unknown_action_is_usage_error(

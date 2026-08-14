@@ -20,10 +20,12 @@ outside tests explicitly intended to qualify native host registration. It also
 replaces Unroot's configured `sudo` path with a test guard so an unprivileged
 regression cannot modify global registration state.
 
-Archive coverage performs a real GNU tar round trip, checks xattr preservation,
-and verifies that `.unroot` metadata cannot cross the archive boundary. The
-rich-ID test additionally proves that logical archive ownership survives both
-host subordinate-ID translation and a second unpack.
+Archive coverage performs real libarchive pack and unpack operations through
+the sibling host helper, checks xattr, link, sparse-file, mode, and timestamp
+preservation, and verifies that unsafe paths and `.unroot` metadata cannot
+cross the archive boundary. GNU tar is used only to construct independent test
+fixtures. The rich-ID test additionally proves that logical archive ownership
+survives both host subordinate-ID translation and a second unpack.
 
 Set `UNROOT_E2E_STRICT=1` for release qualification. In strict mode, missing
 fixtures fail instead of skipping. Named platform guarantees can be made
@@ -41,12 +43,12 @@ GitHub CI sets Ubuntu's AppArmor user-namespace restriction explicitly. The
 restricted cells run `test_namespace_policy.py`; enabled cells run the complete
 single-ID rootfs, rich-ID, native-ownership, and cross-architecture suites.
 
-Ubuntu builds the helper with libsubid so the rich-ID suite exercises
-provider-backed selection, persisted-map reuse, and exact-allocation
-validation. Controlled CI allocations also qualify a 100,000-ID rich map and
-round-trip ownership at logical UID/GID 100000. CI also builds and runs
-`unroot-util` against musl with its
-direct-file fallback.
+Ubuntu builds the helper with libsubid and libarchive so the rich-ID suite
+exercises provider-backed selection, persisted-map reuse, exact-allocation
+validation, and the production archive engine. Controlled CI allocations also
+qualify a 100,000-ID rich map and round-trip ownership at logical UID/GID
+100000. CI also builds and runs `unroot-util` against musl with its direct-file
+subordinate-ID fallback and libarchive enabled.
 
 The Docker qualification keeps an ordinary container as a negative control.
 Its restricted system-path cell verifies that a denied `newuidmap` write is

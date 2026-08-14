@@ -71,7 +71,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential busybox-static libsubid-dev python3-pytest qemu-user-static \
+            build-essential busybox-static libarchive-dev libsubid-dev \
+            python3-pytest qemu-user-static \
             uidmap ${{ matrix.cross_package }}
       - name: Enable unprivileged user namespaces
         run: |
@@ -80,6 +81,8 @@ jobs:
           printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
           printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
       - name: Build authoritative artifact
+        env:
+          UNROOT_UTIL_LIBARCHIVE: "1"
         run: >-
           python3 scripts/release.py build
           --architecture "${{ matrix.architecture }}"
@@ -192,7 +195,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential debhelper dpkg-dev libsubid-dev python3 \
+            build-essential debhelper dpkg-dev libarchive-dev libsubid-dev python3 \
             python3-pytest uidmap xz-utils
       - name: Install RPM package toolchain
         if: matrix.family == 'rpm'
@@ -202,7 +205,7 @@ jobs:
             dnf config-manager --set-enabled crb
           fi
           dnf install -y \
-            gcc-c++ glibc-static libstdc++-static make python3 \
+            gcc-c++ glibc-static libarchive-devel libstdc++-static make python3 \
             python3-pytest rpm-build shadow-utils-subid-devel xz
       - name: Build target-native package
         run: >-

@@ -4,7 +4,6 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "hostcaps.hpp"
 #include "nlohmann/json.hpp"
 #include "linuxns.hpp"
 #include "meta.hpp"
@@ -289,10 +288,6 @@ bool updateQemuWrapper(const fs::path& rootfs,
   try {
     auto j = loadMetaJson(rootfs);
     bool changed = false;
-    // Ensure hostCaps snapshot present (idempotent)
-    if (!j.contains("hostCaps")) {
-      try { j["hostCaps"] = getGlobalHostCaps().toJson(true); changed = true; } catch (...) {}
-    }
     nlohmann::json qw = nlohmann::json::object();
     if (j.contains("qemuWrapper") && j["qemuWrapper"].is_object()) {
       qw = j["qemuWrapper"];

@@ -1,114 +1,153 @@
-// hostcaps.cpp
 #include "hostcaps.hpp"
-#include <sys/utsname.h>
-#include <sys/stat.h>
-#include <sys/syscall.h>
-#include <sys/mount.h>
-#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 #include <fcntl.h>
 #include <sched.h>
+#include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
-#include <cerrno>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include "util/file.hpp"
+#include <unistd.h>
+
+#include "archive_report.hpp"
+#include "util/host_helper.hpp"
+#include "util/path.hpp"
 
 namespace {
-struct ProbeResult { bool ok=false; };
-static ProbeResult probeUnshareRaw(unsigned long flag){ ProbeResult pr; pid_t p=::fork(); if(p<0) return pr; if(p==0){ int rc=(::unshare(flag)==0)?0:1; _exit(rc);} int st=0; if(::waitpid(p,&st,0)<0) return pr; if(WIFEXITED(st) && WEXITSTATUS(st)==0) pr.ok=true; return pr; }
-static ProbeResult probeNs(unsigned long flag, bool userSupported){ if(flag==CLONE_NEWUSER) return probeUnshareRaw(flag); ProbeResult pr=probeUnshareRaw(flag); if(pr.ok) return pr; if(userSupported){ ProbeResult comb=probeUnshareRaw(CLONE_NEWUSER|flag); if(comb.ok) return comb; } return pr; }
-static bool pathExists(const char* p){ struct stat st{}; return ::stat(p,&st)==0; }
-static bool pathWritable(const char* p){ int fd=::open(p,O_WRONLY|O_CLOEXEC); if(fd<0) return false; ::close(fd); return true; }
-static bool probeOverlayfs() {
-    char workspace[] = "/tmp/.unroot-ovl-test-XXXXXX";
-    char* base = ::mkdtemp(workspace);
-    if (!base) return false;
-    std::string lower = std::string(base) + "/lower";
-    std::string upper = std::string(base) + "/upper";
-    std::string work = std::string(base) + "/work";
-    std::string mountpoint = std::string(base) + "/mnt";
-    bool prepared = ::mkdir(lower.c_str(), 0700) == 0 &&
-                    ::mkdir(upper.c_str(), 0700) == 0 &&
-                    ::mkdir(work.c_str(), 0700) == 0 &&
-                    ::mkdir(mountpoint.c_str(), 0700) == 0;
-    std::string options = "lowerdir=" + lower + ",upperdir=" + upper +
-                          ",workdir=" + work;
-    bool mounted = prepared &&
-                   ::mount("overlay", mountpoint.c_str(), "overlay", 0,
-                           options.c_str()) == 0;
-    if (mounted) (void)::umount(mountpoint.c_str());
-    (void)::rmdir(mountpoint.c_str());
-    (void)::rmdir(work.c_str());
-    (void)::rmdir(upper.c_str());
-    (void)::rmdir(lower.c_str());
-    (void)::rmdir(base);
-    return mounted;
-}
+
+Capability available(std::string detail = {}) {
+  return {CapabilityStatus::Available, std::move(detail)};
 }
 
-void HostCaps::probe() {
-    m_probedEpoch = static_cast<long long>(::time(nullptr));
-    struct utsname un{}; if(::uname(&un)==0){ m_kernelRelease=un.release; m_kernelNode=un.nodename; }
-    auto user = probeNs(CLONE_NEWUSER,false); m_userNs = user.ok; bool userSupported = m_userNs;
-    m_pidNs = probeNs(CLONE_NEWPID,userSupported).ok;
-    m_mntNs = probeNs(CLONE_NEWNS,userSupported).ok;
-#ifdef CLONE_NEWUTS
-    m_utsNs = probeNs(CLONE_NEWUTS,userSupported).ok;
-#endif
-#ifdef CLONE_NEWIPC
-    m_ipcNs = probeNs(CLONE_NEWIPC,userSupported).ok;
-#endif
-#ifdef CLONE_NEWNET
-    m_netNs = probeNs(CLONE_NEWNET,userSupported).ok;
-#endif
-#ifdef CLONE_NEWCGROUP
-    m_cgroupNs = probeNs(CLONE_NEWCGROUP,userSupported).ok;
-#endif
-    m_binfmtFs = pathExists("/proc/sys/fs/binfmt_misc");
-    m_binfmtRegWritable = pathWritable("/proc/sys/fs/binfmt_misc/register");
-    m_setgroupsFile = pathExists("/proc/self/setgroups");
-    m_setgroupsWritable = m_setgroupsFile && pathWritable("/proc/self/setgroups");
-    // helpers
-    m_newuidmap = (::access("/usr/bin/newuidmap", X_OK)==0);
-    m_newgidmap = (::access("/usr/bin/newgidmap", X_OK)==0);
-    // seccomp
-    std::string status = util::readSmallFile("/proc/self/status"); m_seccomp = (status.find("Seccomp:")!=std::string::npos);
-    // cgroup v2
-    struct stat st{}; if(::stat("/sys/fs/cgroup/cgroup.controllers",&st)==0) m_cgroupV2=true; else if(::stat("/sys/fs/cgroup/unified",&st)==0) m_cgroupV2=true;
-    // overlayfs (best-effort diagnostic mount)
-    m_overlayfs = probeOverlayfs();
-    // shiftfs
-    m_shiftfs = pathExists("/sys/module/shiftfs");
-    // idmapped mounts
-#ifdef SYS_mount_setattr
-    errno=0; long rc = ::syscall(SYS_mount_setattr,-1,"",0U,nullptr,0U); m_idmappedMounts=(rc==-1 && errno==EBADF);
-#endif
+Capability unavailable(std::string detail) {
+  return {CapabilityStatus::Unavailable, std::move(detail)};
 }
 
-HostCaps& getGlobalHostCaps() {
-    static HostCaps caps; static bool probed=false; if(!probed){ caps.probe(); probed=true; } return caps;
+Capability unknown(std::string detail) {
+  return {CapabilityStatus::Unknown, std::move(detail)};
 }
 
-void reprobeGlobalHostCaps() { HostCaps& c = getGlobalHostCaps(); c.probe(); }
+Capability executable(const char* name) {
+  const std::string path = util::findOnPath(name);
+  return path.empty() ? unavailable(std::string(name) + " was not found on PATH")
+                      : available(path);
+}
 
-nlohmann::json HostCaps::toJson(bool includeTimestamp) const {
-    nlohmann::json hc = nlohmann::json::object();
-    hc["kernelRelease"] = m_kernelRelease;
-    hc["kernelNode"] = m_kernelNode;
-    hc["namespaces"] = {
-        {"user", m_userNs}, {"pid", m_pidNs}, {"mount", m_mntNs}, {"uts", m_utsNs}, {"ipc", m_ipcNs}, {"net", m_netNs}, {"cgroup", m_cgroupNs}
-    };
-    hc["binfmt"] = {
-        {"hostMounted", m_binfmtFs}, {"hostRegisterWritable", m_binfmtRegWritable}
-    };
-    hc["setgroups"] = { {"present", m_setgroupsFile}, {"writable", m_setgroupsWritable} };
-    hc["helpers"] = { {"newuidmap", m_newuidmap}, {"newgidmap", m_newgidmap} };
-    hc["seccomp"] = m_seccomp;
-    hc["cgroupV2"] = m_cgroupV2;
-    hc["overlayfs"] = m_overlayfs;
-    hc["shiftfs"] = m_shiftfs;
-    hc["idmappedMounts"] = m_idmappedMounts;
-    if (includeTimestamp) hc["probedEpoch"] = m_probedEpoch;
-    return hc;
+Capability unshareProbe(int flags) {
+  int result[2];
+  if (::pipe2(result, O_CLOEXEC) != 0)
+    return unknown("unable to create probe pipe");
+  const pid_t child = ::fork();
+  if (child == 0) {
+    ::close(result[0]);
+    int error = 0;
+    if (::unshare(flags) != 0) error = errno;
+    (void)::write(result[1], &error, sizeof(error));
+    _exit(error == 0 ? 0 : 1);
+  }
+  ::close(result[1]);
+  if (child < 0) {
+    ::close(result[0]);
+    return unknown("unable to start namespace probe");
+  }
+  int error = 0;
+  const ssize_t count = ::read(result[0], &error, sizeof(error));
+  ::close(result[0]);
+  int status = 0;
+  pid_t waited;
+  do {
+    waited = ::waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  if (waited != child || count != sizeof(error))
+    return unknown("namespace probe did not complete");
+  return error == 0 ? available()
+                    : unavailable(std::string(::strerror(error)));
+}
+
+Capability helperCapability() {
+  const std::string helper = util::siblingHostHelper();
+  return !helper.empty() && ::access(helper.c_str(), X_OK) == 0
+             ? available(helper)
+             : unavailable("unroot-util is not installed next to unroot");
+}
+
+Capability archiveCapability(const Capability& helper) {
+  if (!helper.available()) return unavailable(helper.detail);
+  auto result = util::runHostHelper({"archive", "--version"}, 1024);
+  while (!result.output.empty() &&
+         (result.output.back() == '\n' || result.output.back() == '\r'))
+    result.output.pop_back();
+  if (!result.error.empty()) return unknown(result.error);
+  if (result.truncated) return unknown("oversized unroot-util response");
+  if (result.code != 0)
+    return unavailable(result.output.empty() ? "libarchive support is unavailable"
+                                             : std::move(result.output));
+  const std::string prefix = std::string(archiveinfo::Protocol) + " ";
+  if (result.output.compare(0, prefix.size(), prefix) != 0)
+    return unknown("incompatible unroot-util archive protocol");
+  return available(result.output.substr(prefix.size()));
+}
+
+Capability pathCapability(const char* path, const char* description) {
+  struct stat info {};
+  return ::stat(path, &info) == 0 ? available(path)
+                                  : unavailable(description);
+}
+
+}  // namespace
+
+const char* capabilityStatusName(CapabilityStatus status) {
+  switch (status) {
+    case CapabilityStatus::Available:
+      return "available";
+    case CapabilityStatus::Unavailable:
+      return "unavailable";
+    case CapabilityStatus::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+nlohmann::json Capability::toJson() const {
+  return {{"status", capabilityStatusName(status)}, {"detail", detail}};
+}
+
+HostCaps::HostCaps() {
+  struct utsname host {};
+  if (::uname(&host) == 0) {
+    kernelRelease_ = host.release;
+    machine_ = host.machine;
+  }
+  userNamespaces_ = unshareProbe(CLONE_NEWUSER);
+  mountNamespaces_ = userNamespaces_.available()
+                         ? unshareProbe(CLONE_NEWUSER | CLONE_NEWNS)
+                         : unshareProbe(CLONE_NEWNS);
+  binfmtMisc_ = pathCapability("/proc/sys/fs/binfmt_misc",
+                               "binfmt_misc is not mounted");
+  setgroups_ = pathCapability("/proc/self/setgroups",
+                              "/proc/self/setgroups is unavailable");
+  newuidmap_ = executable("newuidmap");
+  newgidmap_ = executable("newgidmap");
+  hostHelper_ = helperCapability();
+  archiveEngine_ = archiveCapability(hostHelper_);
+}
+
+nlohmann::json HostCaps::toJson() const {
+  return {{"kernel", {{"release", kernelRelease_}, {"machine", machine_}}},
+          {"namespaces",
+           {{"user", userNamespaces_.toJson()},
+            {"mount", mountNamespaces_.toJson()},
+            {"binfmt_misc", binfmtMisc_.toJson()},
+            {"setgroups", setgroups_.toJson()}}},
+          {"helpers",
+           {{"newuidmap", newuidmap_.toJson()},
+            {"newgidmap", newgidmap_.toJson()},
+            {"unroot_util", hostHelper_.toJson()}}},
+          {"archives", {{"libarchive", archiveEngine_.toJson()}}}};
+}
+
+const HostCaps& getGlobalHostCaps() {
+  static const HostCaps capabilities;
+  return capabilities;
 }

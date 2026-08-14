@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import io
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 from typing import Callable, Optional
 
 import pytest
 
-from .support import UnrootRunner, create_rootfs, find_static_busybox, run_command
+from .support import (
+    CommandResult,
+    UnrootRunner,
+    create_rootfs,
+    find_static_busybox,
+    run_command,
+)
 
 
 pytestmark = [
@@ -24,13 +33,13 @@ pytestmark = [
 ]
 
 
-def _require_gnu_tar() -> None:
+def _require_fixture_tar() -> None:
     result = subprocess.run(
         ["tar", "--version"], check=False, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     if result.returncode != 0 or "GNU tar" not in result.stdout:
-        pytest.skip("archive actions currently require GNU tar")
+        pytest.skip("GNU tar is required to create this test fixture")
 
 
 def _create_archive(source: Path, archive: Path) -> None:
@@ -45,71 +54,183 @@ def _create_archive(source: Path, archive: Path) -> None:
     )
 
 
-def _metadata_limited_tar(tmp_path: Path) -> Path:
-    tool = tmp_path / "tools" / "tar"
-    tool.parent.mkdir()
-    tool.write_text(
-        """#!/bin/sh
-case " $* " in
-  *" --wildcards "*) exit 1 ;;
-esac
+def _create_named_archive(archive: Path, name: str, content: bytes) -> None:
+    with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as output:
+        member = tarfile.TarInfo(name)
+        member.size = len(content)
+        output.addfile(member, io.BytesIO(content))
 
-directory=.
-member=
-probe=false
-for argument do
-    case "$argument" in
-        --directory=*) directory=${argument#--directory=} ;;
-        --file=/dev/null) probe=true ;;
-        --*) ;;
-        *) member=$argument ;;
-    esac
-done
 
-if "$probe" && [ -n "$member" ] && [ -f "$directory/$member" ]; then
-    echo "tar: POSIX ACL support is not available" >&2
+def _create_hardlink_archive(archive: Path, name: str, target: str) -> None:
+    with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as output:
+        member = tarfile.TarInfo(name)
+        member.type = tarfile.LNKTYPE
+        member.linkname = target
+        output.addfile(member)
+
+
+def test_inspect_archive_reports_structured_contents(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    archive = tmp_path / "input.tar"
+    _create_named_archive(archive, "nested/payload", b"content\n")
+
+    result = unroot.run("inspect", "archive", str(archive), "--json").assert_ok()
+    report = json.loads(result.stdout)
+
+    assert report["members"] == 1
+    assert report["regular_bytes"] == 8
+    assert report["layout"] == {"oci": False, "reserved_metadata": False}
+    assert report["metadata"]["unsafe_paths"]["count"] == 0
+
+
+def test_unpack_rejects_oci_layout_before_creating_root(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    archive = tmp_path / "oci.tar"
+    _create_named_archive(archive, "oci-layout", b'{"imageLayoutVersion":"1.0.0"}\n')
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        unroot, ["unpack", "--native", str(archive), str(root)], {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "archive is an OCI image layout" in result.stderr
+    assert not root.exists()
+
+
+def test_nested_oci_layout_name_remains_a_raw_rootfs_member(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    archive = tmp_path / "raw.tar"
+    _create_named_archive(archive, "nested/oci-layout", b"ordinary file\n")
+
+    result = unroot.run("inspect", "archive", str(archive), "--json").assert_ok()
+
+    assert json.loads(result.stdout)["layout"]["oci"] is False
+
+
+@pytest.mark.parametrize("member", ["../outside", "a/../../outside", "/outside"])
+def test_unpack_rejects_member_paths_outside_the_rootfs(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+    member: str,
+) -> None:
+    archive = tmp_path / "unsafe.tar"
+    _create_named_archive(archive, member, b"unsafe\n")
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        unroot, ["unpack", "--native", str(archive), str(root)], {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "paths outside the rootfs" in result.stderr
+    assert not root.exists()
+
+
+def test_unpack_rejects_hardlinks_to_reserved_metadata(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    archive = tmp_path / "reserved-hardlink.tar"
+    _create_hardlink_archive(archive, "payload", ".unroot/meta.json")
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        unroot, ["unpack", "--native", str(archive), str(root)], {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "reserved .unroot metadata tree" in result.stderr
+    assert not root.exists()
+
+
+def _isolated_unroot(
+    unroot: UnrootRunner, tmp_path: Path, helper_body: str
+) -> UnrootRunner:
+    directory = tmp_path / "isolated-bin"
+    directory.mkdir()
+    binary = directory / "unroot"
+    helper = directory / "unroot-util"
+    real_helper = directory / "unroot-util.real"
+    shutil.copy2(unroot.binary, binary)
+    shutil.copy2(unroot.binary.parent / "unroot-util", real_helper)
+    helper.write_text(
+        "#!/bin/sh\n"
+        f"real={shlex.quote(str(real_helper))}\n"
+        f"{helper_body}\n"
+        'exec "$real" "$@"\n',
+        encoding="utf-8",
+    )
+    helper.chmod(0o755)
+    return UnrootRunner(binary, unroot.repo, unroot.sudo_guard)
+
+
+def _blocking_helper(
+    unroot: UnrootRunner, tmp_path: Path
+) -> tuple[UnrootRunner, Path, Path]:
+    started = tmp_path / "archive-started"
+    release = tmp_path / "archive-release"
+    body = f"""
+if [ "$1" = archive ] && {{ [ "$2" = pack ] || [ "$2" = unpack ]; }}; then
+    : > {shlex.quote(str(started))}
+    while [ ! -e {shlex.quote(str(release))} ]; do
+        read -r _ < /dev/null || :
+    done
 fi
-exit 0
-""",
-        encoding="utf-8",
-    )
-    tool.chmod(0o755)
-    return tool
+"""
+    return _isolated_unroot(unroot, tmp_path, body), started, release
 
 
-def _blocking_tar(tmp_path: Path) -> tuple[Path, Path, Path]:
-    real_tar = shutil.which("tar")
-    assert real_tar is not None
-    tools = tmp_path / "blocking-tools"
-    tools.mkdir()
-    started = tmp_path / "tar-started"
-    release = tmp_path / "tar-release"
-    tool = tools / "tar"
-    tool.write_text(
-        f"""#!/bin/sh
-case " $* " in
-  *" --create "*|*" --extract "*)
-    case " $* " in
-      *" --file=/dev/null "*) ;;
-      *)
-        : > {started}
-        while [ ! -e {release} ]; do read -r _ < /dev/null || :; done
-        ;;
-    esac
-    ;;
-esac
-exec {real_tar} "$@"
-""",
-        encoding="utf-8",
+def test_inspect_host_reports_an_incompatible_archive_helper(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    isolated = _isolated_unroot(
+        unroot,
+        tmp_path,
+        'if [ "$1" = archive ] && [ "$2" = --version ]; then '
+        'printf "other-v1 archive\\n"; exit 0; fi',
     )
-    tool.chmod(0o755)
-    return tools, started, release
+
+    report = json.loads(isolated.run("inspect", "host", "--json").assert_ok().stdout)
+
+    archive = report["archives"]["libarchive"]
+    assert archive["status"] == "unknown"
+    assert "incompatible" in archive["detail"]
+
+
+def test_inspect_archive_rejects_a_malformed_helper_record(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    archive = tmp_path / "input.tar"
+    _create_named_archive(archive, "payload", b"content\n")
+    isolated = _isolated_unroot(
+        unroot,
+        tmp_path,
+        'if [ "$1" = archive ] && [ "$2" = inspect ]; then '
+        'printf "other-v1 {}\\n"; exit 0; fi',
+    )
+
+    result = isolated.run("inspect", "archive", str(archive))
+
+    assert result.returncode != 0
+    assert "unknown archive inspection protocol" in result.stderr
 
 
 def _start_unroot(
     unroot: UnrootRunner,
     arguments: list[str],
     env: dict[str, str],
+    prefix: tuple[str, ...] = (),
 ) -> subprocess.Popen[str]:
     process_env = dict(os.environ)
     for name in tuple(process_env):
@@ -118,8 +239,14 @@ def _start_unroot(
     process_env.update(env)
     process_env["UNROOT_SUDO"] = str(unroot.sudo_guard)
     process_env["LC_ALL"] = "C"
+    command = [*prefix]
+    if prefix:
+        command.extend(
+            ["/usr/bin/env", *[f"{name}={value}" for name, value in env.items()]]
+        )
+    command.extend([str(unroot.binary), *arguments])
     return subprocess.Popen(
-        [str(unroot.binary), *arguments],
+        command,
         cwd=unroot.repo,
         env=process_env,
         stdout=subprocess.PIPE,
@@ -127,6 +254,17 @@ def _start_unroot(
         text=True,
         start_new_session=True,
     )
+
+
+def _run_unroot(
+    unroot: UnrootRunner,
+    arguments: list[str],
+    env: dict[str, str],
+    prefix: tuple[str, ...] = (),
+) -> CommandResult:
+    process = _start_unroot(unroot, arguments, env, prefix)
+    stdout, stderr = process.communicate(timeout=30)
+    return CommandResult(tuple(process.args), process.returncode, stdout, stderr)
 
 
 def _wait_for_path(path: Path, process: subprocess.Popen[str]) -> None:
@@ -137,11 +275,11 @@ def _wait_for_path(path: Path, process: subprocess.Popen[str]) -> None:
         if process.poll() is not None:
             stdout, stderr = process.communicate()
             pytest.fail(
-                f"archive owner exited before reaching tar\n"
+                f"archive owner exited before reaching the archive helper\n"
                 f"stdout:\n{stdout}\nstderr:\n{stderr}"
             )
         time.sleep(0.01)
-    pytest.fail("archive owner did not reach tar")
+    pytest.fail("archive owner did not reach the archive helper")
 
 
 def _assert_payload_tree(root: Path) -> None:
@@ -165,7 +303,7 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
     tmp_path: Path,
     require_capability: Callable[[bool, str, Optional[str]], None],
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     source = tmp_path / "source"
     source.mkdir()
     payload = source / "payload"
@@ -217,7 +355,7 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
 def test_pack_requires_initialized_rootfs(
     unroot: UnrootRunner, tmp_path: Path
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     root = tmp_path / "plain-root"
     root.mkdir()
     (root / "payload").write_text("data", encoding="utf-8")
@@ -226,21 +364,20 @@ def test_pack_requires_initialized_rootfs(
     assert "has no ID-map metadata" in result.stderr
 
 
-def test_pack_rejects_tar_that_cannot_preserve_metadata(
-    unroot: UnrootRunner, tmp_path: Path
+def test_pack_does_not_require_tar_on_path(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path
 ) -> None:
-    tool = _metadata_limited_tar(tmp_path)
-    root = tmp_path / "root"
-    root.mkdir()
+    empty_path = tmp_path / "empty-path"
+    empty_path.mkdir()
     archive = tmp_path / "output.tar"
-    path = str(tool.parent) + os.pathsep + os.environ.get("PATH", "")
 
-    result = unroot.run("pack", str(root), str(archive), env={"PATH": path})
+    result = unroot.run(
+        "pack", str(managed_rootfs), str(archive),
+        env={"PATH": str(empty_path)},
+    )
 
-    assert result.returncode != 0
-    assert "POSIX ACL support is not available" in result.stderr
-    assert "Use --force to accept metadata loss" in result.stderr
-    assert not archive.exists()
+    result.assert_ok()
+    assert archive.is_file()
 
 
 def test_failed_pack_does_not_publish_partial_archive(
@@ -248,29 +385,13 @@ def test_failed_pack_does_not_publish_partial_archive(
     managed_rootfs: Path,
     tmp_path: Path,
 ) -> None:
-    tools = tmp_path / "failing-tools"
-    tools.mkdir()
-    real_tar = shutil.which("tar")
-    assert real_tar is not None
-    tool = tools / "tar"
-    tool.write_text(
-        f"""#!/bin/sh
-for argument do
-    if [ "$argument" = --file=/dev/null ]; then
-        exec {real_tar} "$@"
-    fi
-done
-exit 42
-""",
-        encoding="utf-8",
+    isolated = _isolated_unroot(
+        unroot, tmp_path,
+        'if [ "$1" = archive ] && [ "$2" = pack ]; then exit 42; fi',
     )
-    tool.chmod(0o755)
     archive = tmp_path / "partial.tar"
-    path = str(tools) + os.pathsep + os.environ.get("PATH", "")
 
-    result = unroot.run(
-        "pack", str(managed_rootfs), str(archive), env={"PATH": path}
-    )
+    result = isolated.run("pack", str(managed_rootfs), str(archive))
 
     assert result.returncode == 42
     assert not archive.exists()
@@ -300,7 +421,6 @@ def test_pack_and_unpack_reject_an_active_rootfs_archive_lock(
 ) -> None:
     import fcntl
 
-    _require_gnu_tar()
     archive = tmp_path / "input.tar"
     unroot.run("pack", str(managed_rootfs), str(archive)).assert_ok()
 
@@ -328,7 +448,6 @@ def test_unpack_rejects_an_active_lock_before_root_creation(
 ) -> None:
     import fcntl
 
-    _require_gnu_tar()
     archive = tmp_path / "input.tar"
     unroot.run("pack", str(managed_rootfs), str(archive)).assert_ok()
     root = tmp_path / "new-root"
@@ -362,36 +481,32 @@ def test_archive_operation_pairs_share_one_rootfs_lock(
     owner_action: str,
     contender_action: str,
 ) -> None:
-    _require_gnu_tar()
     source_archive = tmp_path / "source.tar"
     unroot.run("pack", str(managed_rootfs), str(source_archive)).assert_ok()
     root = managed_rootfs
     if owner_action == "unpack":
         root = tmp_path / "unpack-root"
 
-    tools, started, release = _blocking_tar(tmp_path)
-    path = str(tools) + os.pathsep + os.environ.get("PATH", "")
+    isolated, started, release = _blocking_helper(unroot, tmp_path)
     owner_arguments = (
         ["pack", str(root), str(tmp_path / "owner.tar")]
         if owner_action == "pack"
         else ["unpack", str(source_archive), str(root)]
     )
-    owner = _start_unroot(unroot, owner_arguments, {"PATH": path})
+    owner = _start_unroot(isolated, owner_arguments, {})
     try:
         _wait_for_path(started, owner)
         contender = (
-            unroot.run(
+            isolated.run(
                 "pack",
                 str(root),
                 str(tmp_path / "contender.tar"),
-                env={"PATH": path},
             )
             if contender_action == "pack"
-            else unroot.run(
+            else isolated.run(
                 "unpack",
                 str(source_archive),
                 str(root),
-                env={"PATH": path},
             )
         )
         assert contender.returncode != 0
@@ -405,7 +520,7 @@ def test_archive_operation_pairs_share_one_rootfs_lock(
 def test_unpack_refuses_to_overlay_an_existing_tree(
     unroot: UnrootRunner, tmp_path: Path
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     source = tmp_path / "source"
     source.mkdir()
     (source / "payload").write_text("archive", encoding="utf-8")
@@ -422,45 +537,41 @@ def test_unpack_refuses_to_overlay_an_existing_tree(
     assert existing.read_text(encoding="utf-8") == "keep"
 
 
-def test_unpack_rejects_tar_that_cannot_preserve_metadata(
-    unroot: UnrootRunner, tmp_path: Path
+@pytest.mark.parametrize("force", [False, True])
+def test_unpack_does_not_require_tar_on_path(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+    force: bool,
 ) -> None:
-    tool = _metadata_limited_tar(tmp_path)
+    _require_fixture_tar()
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "payload").write_text("archive\n", encoding="utf-8")
     archive = tmp_path / "input.tar"
-    archive.touch()
+    _create_archive(source, archive)
     root = tmp_path / "root"
-    path = str(tool.parent) + os.pathsep + os.environ.get("PATH", "")
+    empty_path = tmp_path / "empty-path"
+    empty_path.mkdir()
+    arguments = ["unpack", "--native"]
+    if force:
+        arguments.append("--force")
+    arguments.extend([str(archive), str(root)])
 
-    result = unroot.run("unpack", str(archive), str(root), env={"PATH": path})
-
-    assert result.returncode != 0
-    assert "POSIX ACL support is not available" in result.stderr
-    assert "Use --force to accept metadata loss" in result.stderr
-    assert not root.exists()
-
-
-def test_unpack_force_accepts_reported_metadata_loss(
-    unroot: UnrootRunner, tmp_path: Path
-) -> None:
-    tool = _metadata_limited_tar(tmp_path)
-    archive = tmp_path / "input.tar"
-    archive.touch()
-    root = tmp_path / "root"
-    path = str(tool.parent) + os.pathsep + os.environ.get("PATH", "")
-
-    result = unroot.run(
-        "unpack", "--force", str(archive), str(root), env={"PATH": path}
+    result = _run_unroot(
+        unroot, arguments, {"PATH": str(empty_path)}, privileged_prefix
     )
 
-    assert "POSIX ACL support is not available" in result.stderr
-    assert "Continuing because --force was specified" in result.stderr
-    assert "Use --force to accept metadata loss" not in result.stderr
+    result.assert_ok()
+    assert (root / "payload").read_text(encoding="utf-8") == "archive\n"
 
 
 def test_unpack_rejects_private_unroot_metadata(
-    unroot: UnrootRunner, tmp_path: Path
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     source = tmp_path / "source"
     private = source / ".unroot"
     private.mkdir(parents=True)
@@ -469,16 +580,135 @@ def test_unpack_rejects_private_unroot_metadata(
     _create_archive(source, archive)
     root = tmp_path / "root"
 
-    result = unroot.run("unpack", str(archive), str(root))
+    result = _run_unroot(
+        unroot,
+        ["unpack", "--native", str(archive), str(root)],
+        {},
+        privileged_prefix,
+    )
     assert result.returncode != 0
     assert "reserved .unroot metadata tree" in result.stderr
     assert not root.exists()
 
 
-def test_unpack_preflights_rich_mapping_before_creating_root(
+@pytest.mark.parametrize(
+    "member",
+    [
+        ".unroot/meta.json",
+        "./.unroot/meta.json",
+        ".//.unroot/meta.json",
+        "././.unroot/meta.json",
+        "/.unroot/meta.json",
+        "./" * 100 + ".unroot/meta.json",
+    ],
+)
+def test_unpack_rejects_normalized_private_metadata_names(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+    member: str,
+) -> None:
+    archive = tmp_path / "input.tar"
+    _create_named_archive(archive, member, b'{"poison": true}\n')
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        unroot,
+        ["unpack", "--native", str(archive), str(root)],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "reserved .unroot metadata tree" in result.stderr
+    assert not root.exists()
+
+
+def test_unpack_rejects_reserved_metadata_before_extraction(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    archive = tmp_path / "input.tar"
+    _create_named_archive(archive, ".//.unroot/meta.json", b"poison\n")
+    log = tmp_path / "archive-operations"
+    isolated = _isolated_unroot(
+        unroot, tmp_path,
+        f'printf "%s %s\\n" "$1" "$2" >> {shlex.quote(str(log))}',
+    )
+
+    result = _run_unroot(
+        isolated,
+        ["unpack", "--native", str(archive), str(tmp_path / "root")],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    operations = log.read_text(encoding="utf-8").splitlines()
+    assert "archive inspect" in operations
+    assert "archive unpack" not in operations
+
+
+def test_unpack_uses_the_archive_opened_before_validation(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    _require_fixture_tar()
+    original = tmp_path / "original"
+    original.mkdir()
+    (original / "payload").write_text("original\n", encoding="utf-8")
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    (replacement / "payload").write_text("replacement\n", encoding="utf-8")
+    archive = tmp_path / "input.tar"
+    alternate = tmp_path / "alternate.tar"
+    _create_archive(original, archive)
+    _create_archive(replacement, alternate)
+
+    started = tmp_path / "extract-started"
+    release = tmp_path / "extract-release"
+    isolated = _isolated_unroot(
+        unroot, tmp_path,
+        f"""
+if [ "$1" = archive ] && [ "$2" = unpack ]; then
+    : > {shlex.quote(str(started))}
+    while [ ! -e {shlex.quote(str(release))} ]; do
+        read -r _ < /dev/null || :
+    done
+fi
+""",
+    )
+    root = tmp_path / "root"
+    process = _start_unroot(
+        isolated,
+        ["unpack", "--native", str(archive), str(root)],
+        {},
+        privileged_prefix,
+    )
+    try:
+        _wait_for_path(started, process)
+        os.replace(alternate, archive)
+        release.touch()
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        release.touch()
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+
+    try:
+        assert process.returncode == 0, f"stdout:\n{stdout}\nstderr:\n{stderr}"
+        assert (root / "payload").read_text(encoding="utf-8") == "original\n"
+    finally:
+        run_command([*privileged_prefix, "rm", "-rf", str(root)]).assert_ok()
+
+
+def test_unpack_requires_the_sibling_archive_helper_before_creating_root(
     unroot: UnrootRunner, tmp_path: Path
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     source = tmp_path / "source"
     source.mkdir()
     (source / "payload").write_text("archive", encoding="utf-8")
@@ -494,14 +724,13 @@ def test_unpack_preflights_rich_mapping_before_creating_root(
 
     assert result.returncode != 0, result.diagnostic()
     assert "unroot-util" in result.stderr
-    assert "sudo unroot unpack --native" in result.stderr
     assert not target.exists()
 
 
 def test_unpack_rejects_symlinked_metadata_without_writing_outside_root(
     unroot: UnrootRunner, tmp_path: Path
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     source = tmp_path / "source"
     source.mkdir()
     (source / "payload").write_text("archive", encoding="utf-8")
@@ -522,7 +751,7 @@ def test_unpack_rejects_symlinked_metadata_without_writing_outside_root(
 def test_native_unpack_persists_native_ownership_when_root_is_available(
     unroot: UnrootRunner, tmp_path: Path, privileged_prefix: tuple[str, ...]
 ) -> None:
-    _require_gnu_tar()
+    _require_fixture_tar()
     busybox = find_static_busybox()
     if busybox is None:
         pytest.skip("a static BusyBox is required for native entry coverage")

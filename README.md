@@ -293,9 +293,9 @@ OCI/container-image layouts, disk images, and installer media are not currently
 supported; additional formats may be added in the future.
 
 `unroot unpack ARCHIVE ROOT` creates a managed rich rootfs and extracts the
-archive inside its subordinate-ID mapping. It preflights helper binaries and ID
-ranges before creating `ROOT`, avoiding partial extraction when the host isn't
-configured for rich ownership.
+archive inside its subordinate-ID mapping. It opens and inspects the archive,
+then preflights helper binaries, archive ownership, and ID ranges before
+extraction, avoiding partial work when the input or host setup is unsuitable.
 
 Use `sudo unroot unpack --native ARCHIVE ROOT` for host numeric IDs. Both forms
 record their ownership mode in `ROOT/.unroot/meta.json`.
@@ -322,7 +322,13 @@ modified during either conversion.
 
 Packing requires a managed rootfs. Unpacking requires an empty destination and
 never overlays an existing tree. Host-specific `.unroot` metadata is excluded
-from archives; incoming archives containing it are rejected.
+from archives; incoming archives containing it are rejected. Unsafe archive
+paths and OCI image layouts are also rejected before extraction.
+
+Use `unroot inspect archive ARCHIVE` to see the format, ownership range,
+layout, and extended metadata without extracting it. `unroot inspect host`
+reports the namespace, mapping-helper, and libarchive capabilities used by the
+real operations. Both commands support `--json` for diagnostic tooling.
 
 ## How unroot Works
 
@@ -412,15 +418,16 @@ rich rootfs feature set.
   `binfmt_misc` handlers already registered)
 - Host `binfmt_misc` and a trusted static QEMU emulator for native foreign
   execution when no compatible handler is already present
-- GNU tar for `pack` and `unpack`, plus the compression program selected by an
-  archive suffix when creating compressed output
+- A libarchive-enabled `unroot-util` beside `unroot` for archive inspection,
+  `pack`, and `unpack`
 - A C++17 compiler and GNU Make when building from source
 
 `make cli` produces a statically linked `bin/unroot` namespace engine and a
 dynamically linked `bin/unroot-util` host-integration helper. `make install`
 places both in the same directory. When libsubid's development interface is
 available, the helper uses the host's configured subordinate-ID provider;
-otherwise it reads `/etc/subuid` and `/etc/subgid`. See
+otherwise it reads `/etc/subuid` and `/etc/subgid`. Archive operations use the
+host's libarchive through the same helper. See
 [Host Integration Helper](docs/helper-architecture.md).
 
 ## Build And Test

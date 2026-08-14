@@ -1,7 +1,8 @@
 # Unroot Source
 
-Unroot is a C++17 program built as one static `bin/unroot` executable. The
-initial public interface provides `enter`, `pack`, and `unpack` actions.
+Unroot is a C++17 program with a static `bin/unroot` namespace engine and a
+dynamic `bin/unroot-util` host integration helper. The public interface
+provides `enter`, `pack`, `unpack`, and `inspect` actions.
 
 ## Core Flow
 
@@ -10,7 +11,10 @@ initial public interface provides `enter`, `pack`, and `unpack` actions.
 - `actions/enter_config.cpp` and `actions/enter_action.cpp` turn the command
   line into one namespace-entry request.
 - `actions/archive_config.cpp` and `actions/archive_action.cpp` capture and
-  restore tar archives under the rootfs's persisted ID map.
+  restore archives under the rootfs's persisted ID map.
+- `archive_input.cpp`, `archive_inspector.cpp`, and `archive_backend.cpp` pin
+  archive objects, consume structured inspection facts, and execute the exact
+  sibling helper under engine-selected namespace policy.
 - `linuxns.cpp` owns user, mount, and PID namespace creation, ID-map
   authorization, rootfs setup, and target-process lifecycle.
 - `util/rootfs.cpp` is the descriptor-relative boundary for host-side access to
@@ -31,7 +35,9 @@ initial public interface provides `enter`, `pack`, and `unpack` actions.
 ## Supporting Services
 
 - `meta.cpp` records rootfs metadata through the contained rootfs API.
-- `hostcaps.cpp` gathers diagnostic host capabilities.
+- `hostcaps.cpp` gathers the shared diagnostic host capabilities.
+- `util/archive_inspector.cpp` and `util/archive_engine.cpp` are the
+  libarchive-backed services linked only into `unroot-util`.
 - `diagnostics.cpp` reports fatal errors and observable namespace-policy
   context.
 - `util/` and `include/util/` provide narrow internal services for file

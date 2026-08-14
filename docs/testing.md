@@ -105,11 +105,13 @@ sysctls and an enforcing SELinux context when those facts are visible.
 
 Runs the unit and end-to-end suites. This is the local release gate.
 
-CI builds `unroot-util` against libsubid on Ubuntu and verifies both allocation
-selection and exact recorded-range validation before rich-ID E2E uses that
-provider-aware path. A separate Alpine job builds and executes the helper
-against musl with the direct-file backend. The static `unroot` binary is checked
-independently and must not acquire a dynamic interpreter.
+CI builds `unroot-util` against libsubid and libarchive on Ubuntu and verifies
+both allocation selection and exact recorded-range validation before rich-ID
+E2E uses that provider-aware path. The archive suite exercises the same helper
+for inspection, packing, and extraction. A separate Alpine job builds and
+executes the helper against musl with the direct-file subordinate-ID backend
+and libarchive enabled. The static `unroot` binary is checked independently and
+must not acquire a dynamic interpreter.
 
 Coverage helpers remain available as `make doctest-coverage`,
 `make doctest-coverage-all`, and `make doctest-diff-coverage`.

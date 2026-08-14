@@ -14,6 +14,7 @@
 #include "actions/unified_action_registry.hpp"
 #include "actions/parsed_args.hpp"
 #include "program_context.hpp"
+#include "hostcaps.hpp"
 
 int main(int argc, char** argv) {
   // Set the custom terminate handler as early as possible.
@@ -78,6 +79,9 @@ int main(int argc, char** argv) {
       std::cout << actions::ActionRegistry::get_action(action).help() << std::endl;
       return 0;
     }
+
+    // Current host facts are collected once and shared by all action paths.
+    (void)getGlobalHostCaps();
 
     if (actions::ActionRegistry::has_action(action)) {
       return actions::ActionRegistry::execute(action, parsed_args);
