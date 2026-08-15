@@ -442,7 +442,7 @@ def test_unmanaged_native_rootfs_does_not_inject_host_network_files(
         assert result.stdout == (rootfs / "etc" / name).read_text(encoding="utf-8")
 
 
-def test_managed_rootfs_has_durable_writable_host_network_files(
+def test_managed_rootfs_has_default_injections(
     unroot: UnrootRunner, managed_rootfs: Path
 ) -> None:
     result = unroot.run(
@@ -461,6 +461,9 @@ def test_managed_rootfs_has_durable_writable_host_network_files(
         Path("/etc/resolv.conf").read_text(encoding="utf-8")
         + Path("/etc/hosts").read_text(encoding="utf-8")
     )
+    assert (managed_rootfs / "etc" / "mtab").readlink() == Path(
+        "/proc/self/mounts"
+    )
     registry = json.loads(
         (managed_rootfs / ".unroot" / "injections" / "registry.json").read_text(
             encoding="utf-8"
@@ -472,6 +475,7 @@ def test_managed_rootfs_has_durable_writable_host_network_files(
     } == {
         ("resolv.conf", "/etc/resolv.conf", "absent"),
         ("hosts", "/etc/hosts", "absent"),
+        ("mtab", "/etc/mtab", "absent"),
     }
 
     listed = json.loads(
@@ -482,7 +486,11 @@ def test_managed_rootfs_has_durable_writable_host_network_files(
     assert {item["name"] for item in listed["entries"]} == {
         "resolv.conf",
         "hosts",
+        "mtab",
     }
+    mtab = next(item for item in listed["entries"] if item["name"] == "mtab")
+    assert mtab["mode"] == "0777"
+    assert mtab["current"] == "symlink"
 
 
 def test_inject_clear_restores_defaults_and_add_reenables_one(
@@ -492,6 +500,7 @@ def test_inject_clear_restores_defaults_and_add_reenables_one(
 
     assert not (managed_rootfs / "etc" / "hosts").exists()
     assert not (managed_rootfs / "etc" / "resolv.conf").exists()
+    assert not (managed_rootfs / "etc" / "mtab").exists()
     assert (
         unroot.run("inject", "list", str(managed_rootfs)).assert_ok().stdout
         == "No injections registered.\n"
@@ -501,6 +510,11 @@ def test_inject_clear_restores_defaults_and_add_reenables_one(
     assert (managed_rootfs / "etc" / "hosts").read_text(
         encoding="utf-8"
     ) == Path("/etc/hosts").read_text(encoding="utf-8")
+
+    unroot.run("inject", "add", str(managed_rootfs), "mtab").assert_ok()
+    assert (managed_rootfs / "etc" / "mtab").readlink() == Path(
+        "/proc/self/mounts"
+    )
 
 
 def test_inject_remove_validates_all_targets_before_restoring(

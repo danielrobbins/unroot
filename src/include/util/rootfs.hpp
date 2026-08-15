@@ -30,6 +30,9 @@ class Rootfs {
                           mode_t mode = 0755) const;
   bool copyFileAtomic(int source, const std::string& destination,
                       uid_t uid, gid_t gid, mode_t mode) const;
+  bool symlinkAtomic(const std::string& target,
+                     const std::string& destination,
+                     uid_t uid, gid_t gid) const;
   bool parentDirectoryExists(const std::string& path) const;
   bool linkHostFile(const std::string& source,
                     const std::string& destination) const;

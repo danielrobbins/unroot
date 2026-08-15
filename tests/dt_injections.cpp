@@ -33,6 +33,14 @@ TEST_CASE("injection specs accept builtins and typed file mappings") {
   CHECK(builtin.source == "/etc/hosts");
   CHECK(builtin.destination == "/etc/hosts");
 
+  injections::Spec mtab;
+  REQUIRE(injections::parseSpec("mtab", mtab, error));
+  CHECK(mtab.name == "mtab");
+  CHECK(mtab.kind == injections::Kind::Symlink);
+  CHECK(mtab.target == "/proc/self/mounts");
+  CHECK(mtab.destination == "/etc/mtab");
+  CHECK(mtab.mode == 0777);
+
   injections::Spec custom;
   REQUIRE(injections::parseSpec(
       "/host/file:/etc/file:12:34:0600", custom, error));
@@ -60,8 +68,9 @@ TEST_CASE("unpack injection controls accept only named exclusions") {
   std::vector<std::string> disabled;
   std::string error;
   REQUIRE(injections::parseUnpackExclusions(
-      "-hosts,-resolv.conf", disabled, error));
-  CHECK((disabled == std::vector<std::string>{"hosts", "resolv.conf"}));
+      "-hosts,-resolv.conf,-mtab", disabled, error));
+  CHECK((disabled ==
+         std::vector<std::string>{"hosts", "resolv.conf", "mtab"}));
 
   REQUIRE(injections::parseUnpackExclusions("-*", disabled, error));
   CHECK(disabled.back() == "*");

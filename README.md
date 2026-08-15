@@ -203,14 +203,16 @@ $ unroot unpack raspi4-rootfs.tar.xz ~/rootfs
 ```
 
 After unpacking, `unroot unpack` also copies in the host's
-`/etc/resolv.conf` and `/etc/hosts`, so DNS name resolution works as expected. 
-You can see what local files were injected into the rootfs as follows:
+`/etc/resolv.conf` and `/etc/hosts`, so DNS name resolution works as expected.
+It installs `/etc/mtab` as a link to the entered namespace's live mount table.
+You can see the active injections as follows:
 
 ```console
 $ unroot inject list ~/rootfs
 NAME            DESTINATION                 OWNER       MODE    ORIGINAL  CURRENT
 resolv.conf     /etc/resolv.conf            0:0         0644    regular   present
 hosts           /etc/hosts                  0:0         0644    absent    present
+mtab            /etc/mtab                   0:0         0777    symlink   symlink
 ```
 
 The originals they may have overwritten are safely preserved — they
@@ -348,10 +350,11 @@ from archives; incoming archives containing it are rejected.
 
 ## Managing Rootfs Injections
 
-Files copied from the host into a managed rootfs are called *injections*.
-`unpack` registers `hosts` and `resolv.conf` by default, preserving whatever was
-at each destination before installing a writable host copy. The registrations
-are durable: later `enter` commands simply use the current files.
+Host files and compatibility links installed into a managed rootfs are called
+*injections*. `unpack` registers `hosts`, `resolv.conf`, and `mtab` by default,
+preserving whatever was at each destination before installing writable host
+copies and the `/etc/mtab` link to `/proc/self/mounts`. The registrations are
+durable: later `enter` commands simply use the current files and link.
 
 See what is registered:
 
@@ -368,11 +371,12 @@ $ unroot inject remove ~/rootfs hosts
 $ unroot inject add ~/rootfs hosts
 ```
 
-To create a rootfs without one or both defaults, you subtract them at unpack time
-in addition to removing them after with `unroot inject remove`:
+To create a rootfs without one or more defaults, subtract them at unpack time or
+remove them afterward with `unroot inject remove`:
 
 ```console
 $ unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs
+$ unroot unpack --inject=-mtab stage3.tar.xz ~/rootfs
 $ unroot unpack --inject=-* stage3.tar.xz ~/rootfs
 ```
 
@@ -386,9 +390,10 @@ $ unroot inject add ~/rootfs /host/config:/etc/example/config:0:0:0600
 `unroot inject remove` restores the destination that was preserved when the
 registration was first added; `unroot inject clear` restores every registered
 destination. `pack` leaves the live rootfs unchanged but writes those preserved
-portable originals to the archive, so host-specific and custom injected content
-does not leak into the result. See [ROOTFS INJECTIONS](docs/unroot.md#rootfs-injections)
-for the complete file-type, ownership, and lifecycle contract.
+portable originals to the archive, so host-specific files, generated links,
+and custom injected content do not leak into the result. See
+[ROOTFS INJECTIONS](docs/unroot.md#rootfs-injections) for the complete
+file-type, ownership, and lifecycle contract.
 
 Use `unroot inspect archive ARCHIVE` to see the format, ownership range,
 layout, and extended metadata without extracting it. `unroot inspect host`

@@ -81,6 +81,13 @@ std::vector<Spec> builtins() {
   hosts.source = "/etc/hosts";
   hosts.destination = "/etc/hosts";
   result.push_back(std::move(hosts));
+  Spec mtab;
+  mtab.name = "mtab";
+  mtab.kind = Kind::Symlink;
+  mtab.target = "/proc/self/mounts";
+  mtab.destination = "/etc/mtab";
+  mtab.mode = 0777;
+  result.push_back(std::move(mtab));
   return result;
 }
 
@@ -119,6 +126,13 @@ bool prepareSources(std::vector<Spec>& specs, const util::IdMapPlan& idmap,
       error = "injection ownership is outside the rootfs ID map: " +
               spec.destination;
       return false;
+    }
+    if (spec.kind == Kind::Symlink) {
+      if (!absolutePath(spec.target)) {
+        error = "invalid injection symlink target: " + spec.target;
+        return false;
+      }
+      continue;
     }
     UniqueFd pinned(::open(spec.source.c_str(), O_PATH | O_CLOEXEC));
     struct stat info {};
@@ -255,20 +269,27 @@ bool restore(const std::string& rootfs, const util::IdMapPlan& idmap,
 bool install(const std::string& rootfs, const util::IdMapPlan& idmap,
              const util::Rootfs& root, Spec& spec, const Entry* existing,
              Entry& result, std::string& error) {
-  UniqueFd source(::fcntl(spec.sourceFd.get(), F_DUPFD, STDERR_FILENO + 1));
-  if (!source) {
-    error = "unable to pass injection source to unroot-util";
-    return false;
+  UniqueFd source;
+  std::vector<std::string> arguments{"injection", "install"};
+  if (spec.kind == Kind::Regular) {
+    source.reset(::fcntl(spec.sourceFd.get(), F_DUPFD, STDERR_FILENO + 1));
+    if (!source) {
+      error = "unable to pass injection source to unroot-util";
+      return false;
+    }
+    arguments.insert(arguments.end(), {"--fd", std::to_string(source.get())});
+  } else {
+    arguments.insert(arguments.end(), {"--target", spec.target});
   }
   const std::string original = existing ? existing->original : "capture";
-  if (runMapped(rootfs, idmap,
-                {"injection", "install", "--fd", std::to_string(source.get()),
-                 "--destination", spec.destination, "--backup",
-                 backupPath(spec.destination), "--absent",
-                 absentPath(spec.destination), "--original", original, "--uid",
-                 std::to_string(spec.uid), "--gid", std::to_string(spec.gid),
-                 "--mode", std::to_string(spec.mode)},
-                error) != 0)
+  arguments.insert(arguments.end(),
+                   {"--destination", spec.destination, "--backup",
+                    backupPath(spec.destination), "--absent",
+                    absentPath(spec.destination), "--original", original,
+                    "--uid", std::to_string(spec.uid), "--gid",
+                    std::to_string(spec.gid), "--mode",
+                    std::to_string(spec.mode)});
+  if (runMapped(rootfs, idmap, std::move(arguments), error) != 0)
     return false;
 
   result.name = spec.name.empty() && existing ? existing->name : spec.name;

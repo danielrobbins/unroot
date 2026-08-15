@@ -9,9 +9,13 @@
 
 namespace injections {
 
+enum class Kind { Regular, Symlink };
+
 struct Spec {
   std::string name;
+  Kind kind = Kind::Regular;
   std::string source;
+  std::string target;
   std::string destination;
   unsigned int uid = 0;
   unsigned int gid = 0;

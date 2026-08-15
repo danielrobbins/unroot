@@ -204,9 +204,11 @@ int injectionCommand(int argc, char** argv) {
     unsigned int uid = 0;
     unsigned int gid = 0;
     unsigned int mode = 0;
+    const bool regular = argc == 19 && std::string(argv[3]) == "--fd";
+    const bool symlink = argc == 19 && std::string(argv[3]) == "--target";
     if (operation != "install" || argc != 19 ||
-        std::string(argv[3]) != "--fd" ||
-        !parseId(argv[4], descriptor) || descriptor > INT_MAX ||
+        (!regular && !symlink) ||
+        (regular && (!parseId(argv[4], descriptor) || descriptor > INT_MAX)) ||
         std::string(argv[5]) != "--destination" ||
         std::string(argv[7]) != "--backup" ||
         std::string(argv[9]) != "--absent" ||
@@ -220,10 +222,20 @@ int injectionCommand(int argc, char** argv) {
     }
 
     util::Rootfs root(".");
+    if (!root) {
+        std::cerr << "unable to open injection rootfs\n";
+        return 1;
+    }
     struct stat source {};
-    if (!root || ::fstat(static_cast<int>(descriptor), &source) != 0 ||
-        !S_ISREG(source.st_mode)) {
+    if (regular && (::fstat(static_cast<int>(descriptor), &source) != 0 ||
+                    !S_ISREG(source.st_mode))) {
         std::cerr << "injection source is not a regular file\n";
+        return 1;
+    }
+    const std::string payload = argv[4];
+    if (symlink && (payload.empty() || payload.front() != '/' ||
+                    payload.find('\n') != std::string::npos)) {
+        std::cerr << "injection symlink target is invalid\n";
         return 1;
     }
     const std::string destination = argv[6];
@@ -273,9 +285,13 @@ int injectionCommand(int argc, char** argv) {
         return 1;
     }
 
-    if (root.copyFileAtomic(static_cast<int>(descriptor), destination,
-                            static_cast<uid_t>(uid), static_cast<gid_t>(gid),
-                            static_cast<mode_t>(mode)))
+    const bool installed = regular
+        ? root.copyFileAtomic(static_cast<int>(descriptor), destination,
+                              static_cast<uid_t>(uid), static_cast<gid_t>(gid),
+                              static_cast<mode_t>(mode))
+        : root.symlinkAtomic(payload, destination, static_cast<uid_t>(uid),
+                             static_cast<gid_t>(gid));
+    if (installed)
         return 0;
     if (captured) {
         const std::string capturedType = root.lstat(backup, target)

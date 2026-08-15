@@ -115,7 +115,7 @@ public:
   static const std::vector<std::string>& known() {
   static std::vector<std::string> v{
   "devbind","sys","proc",
-  "devpts","shm","run","mtab"
+  "devpts","shm","run"
   };
     return v;
   }
@@ -173,7 +173,6 @@ struct NsOptions {
   bool mountTmpfsShm = true;
   bool mountRun = true;
   // removed: mountTmp (no tmpfs over /tmp)
-  bool linkMtab = true;
 };
 
 static NsOptions defaultOptionsAllTrue() {
@@ -185,7 +184,6 @@ static NsOptions defaultOptionsAllTrue() {
   o.mountTmpfsShm = true;
   o.mountRun = true;
   // removed: tmpfs /tmp
-  o.linkMtab = true;
   return o;
 }
 
@@ -201,7 +199,6 @@ static NsOptions resolveOptionsFromEnv(bool hostVisible = false) {
   o.mountTmpfsShm = fs.has("shm");
   o.mountRun = fs.has("run");
   // removed: tmp feature
-  o.linkMtab = fs.has("mtab");
   return o;
 }
 
@@ -410,16 +407,6 @@ static void setupPostChrootMounts(const NsOptions& opt, bool hostVisible) {
         std::string step = std::string("link:") + link.first;
         recordStep(step.c_str(), ok, false, "minimal dev compatibility link");
       }
-    }
-  }
-  // Helpful symlink under /etc.
-  // Only create /etc/mtab symlink if it doesn't already exist.
-  if (opt.linkMtab && !hostVisible) {
-    struct stat st{};
-    if (::lstat("/etc/mtab", &st) != 0) {
-      ensureDirAll("/etc");
-      bool ok = (::symlink("/proc/self/mounts", "/etc/mtab") == 0);
-      recordStep("link:/etc/mtab", ok, false, "non-fatal compatibility link");
     }
   }
 }
