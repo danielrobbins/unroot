@@ -115,7 +115,7 @@ public:
   static const std::vector<std::string>& known() {
   static std::vector<std::string> v{
   "devbind","sys","proc",
-  "devpts","shm","run","mtab"
+  "devpts","shm","run"
   };
     return v;
   }
@@ -173,7 +173,6 @@ struct NsOptions {
   bool mountTmpfsShm = true;
   bool mountRun = true;
   // removed: mountTmp (no tmpfs over /tmp)
-  bool linkMtab = true;
 };
 
 static NsOptions defaultOptionsAllTrue() {
@@ -185,7 +184,6 @@ static NsOptions defaultOptionsAllTrue() {
   o.mountTmpfsShm = true;
   o.mountRun = true;
   // removed: tmpfs /tmp
-  o.linkMtab = true;
   return o;
 }
 
@@ -201,7 +199,6 @@ static NsOptions resolveOptionsFromEnv(bool hostVisible = false) {
   o.mountTmpfsShm = fs.has("shm");
   o.mountRun = fs.has("run");
   // removed: tmp feature
-  o.linkMtab = fs.has("mtab");
   return o;
 }
 
@@ -269,6 +266,12 @@ static bool bindRootfsTarget(const util::Rootfs& root, const char* src,
 static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
                         const EmuPlan* emu,
                         const std::vector<BindMap>* maps) {
+  // Equivalent to mount --bind ROOT ROOT: make the entered root a mountpoint.
+  std::string pinnedRoot = util::Rootfs::fdPath(root.fd());
+  if (!mountBind(pinnedRoot.c_str(), pinnedRoot, false, "bind:rootfs", true,
+                 "rootfs mountpoint"))
+    return false;
+
   // Optional emulator bind (for cross-arch without binfmt): host file -> /tmp/unroot/<name> in rootfs
   if (emu && !emu->source.empty() && !emu->target.empty()) {
     std::string note = std::string("static emulator: src=") + emu->source +
@@ -404,16 +407,6 @@ static void setupPostChrootMounts(const NsOptions& opt, bool hostVisible) {
         std::string step = std::string("link:") + link.first;
         recordStep(step.c_str(), ok, false, "minimal dev compatibility link");
       }
-    }
-  }
-  // Helpful symlink under /etc.
-  // Only create /etc/mtab symlink if it doesn't already exist.
-  if (opt.linkMtab && !hostVisible) {
-    struct stat st{};
-    if (::lstat("/etc/mtab", &st) != 0) {
-      ensureDirAll("/etc");
-      bool ok = (::symlink("/proc/self/mounts", "/etc/mtab") == 0);
-      recordStep("link:/etc/mtab", ok, false, "non-fatal compatibility link");
     }
   }
 }

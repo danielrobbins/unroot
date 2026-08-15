@@ -262,6 +262,34 @@ bool Rootfs::copyFileAtomic(int source, const std::string& destination,
                  mode, uid, gid);
 }
 
+bool Rootfs::symlinkAtomic(const std::string& target,
+                           const std::string& destination,
+                           uid_t uid, gid_t gid) const {
+  std::string leaf;
+  UniqueFd dir = parent(destination, false, leaf);
+  if (!dir) return false;
+
+  std::string temporaryName;
+  bool created = false;
+  for (unsigned int attempt = 0; attempt < 100 && !created; ++attempt) {
+    temporaryName = "." + leaf + ".tmp." + std::to_string(::getpid()) + "." +
+                    std::to_string(attempt);
+    created = ::symlinkat(target.c_str(), dir.get(), temporaryName.c_str()) == 0;
+    if (!created && errno != EEXIST) return false;
+  }
+  if (!created) {
+    errno = EEXIST;
+    return false;
+  }
+
+  const bool ready =
+      ::fchownat(dir.get(), temporaryName.c_str(), uid, gid,
+                 AT_SYMLINK_NOFOLLOW) == 0 &&
+      ::renameat(dir.get(), temporaryName.c_str(), dir.get(), leaf.c_str()) == 0;
+  if (!ready) (void)::unlinkat(dir.get(), temporaryName.c_str(), 0);
+  return ready;
+}
+
 bool Rootfs::parentDirectoryExists(const std::string& path) const {
   std::string leaf;
   return static_cast<bool>(parent(path, false, leaf));

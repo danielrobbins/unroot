@@ -8,16 +8,14 @@
 #include <string>
 #include <vector>
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 #include <archive.h>
 #include <archive_entry.h>
 
 #include "archive_fd.hpp"
-#endif
+#include "archive_progress.hpp"
 
 namespace util {
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 namespace {
 
 using Reader = std::unique_ptr<struct archive, decltype(&archive_read_free)>;
@@ -126,13 +124,9 @@ void inspectType(struct archive_entry* entry, const std::string& path,
 }
 
 }  // namespace
-#endif
 
-ArchiveScanResult inspectArchive(int descriptor) {
-#ifndef UNROOT_HAVE_LIBARCHIVE
-  (void)descriptor;
-  return {{}, "archive inspection requires libarchive support"};
-#else
+ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
+                                 ProgressStyle progressStyle) {
   std::string error;
   UniqueFd input = reopenArchiveDescriptor(descriptor, O_RDONLY, error);
   if (!input) return {{}, std::move(error)};
@@ -150,6 +144,8 @@ ArchiveScanResult inspectArchive(int descriptor) {
     return {{}, std::move(error)};
   }
 
+  ArchiveProgress progress(progressDescriptor, "Inspecting archive",
+                           progressStyle, archiveDescriptorSize(input.get()));
   archiveinfo::ArchiveReport report;
   struct archive_entry* entry = nullptr;
   int status = ARCHIVE_OK;
@@ -181,6 +177,7 @@ ArchiveScanResult inspectArchive(int descriptor) {
     inspectMetadata(entry, path.value, report);
     inspectType(entry, path.value, report);
     if (archive_read_data_skip(reader.get()) < ARCHIVE_WARN) break;
+    progress.update(reader.get());
   }
 
   if (const char* name = archive_format_name(reader.get())) report.format = name;
@@ -195,18 +192,15 @@ ArchiveScanResult inspectArchive(int descriptor) {
     archive_read_close(reader.get());
     return {{}, std::move(error)};
   }
+  progress.update(reader.get());
+  progress.complete();
   archive_read_close(reader.get());
   return {std::move(report), {}};
-#endif
 }
 
 std::string archiveLibraryVersion() {
-#ifdef UNROOT_HAVE_LIBARCHIVE
   const char* version = archive_version_string();
   return version ? version : "libarchive";
-#else
-  return {};
-#endif
 }
 
 }  // namespace util

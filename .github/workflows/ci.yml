@@ -95,7 +95,7 @@ jobs:
           fetch_rootfs FOREIGN "${{ matrix.foreign_rootfs_arch }}" \
             "${{ matrix.foreign_rootfs_sha256 }}"
       - name: Build and run unit tests
-        run: make test cli UNROOT_UTIL_LIBARCHIVE=1 UNROOT_UTIL_LIBSUBID=1
+        run: make test cli UNROOT_UTIL_LIBSUBID=1
       - name: Verify libsubid helper backend
         if: matrix.userns == 'enabled'
         run: |
@@ -215,7 +215,7 @@ jobs:
             apk add --no-cache build-base libarchive-dev
             make clean
             make util LTO=0 STRIP_BINARY=0 \
-              UNROOT_UTIL_LIBARCHIVE=1 UNROOT_UTIL_LIBSUBID=0
+              UNROOT_UTIL_LIBSUBID=0
             ldd bin/unroot-util | grep -q musl
             bin/unroot-util archive --version | grep -q "^unroot-archive-v1 libarchive "
             printf "root:100000:200000\n" > /etc/subuid

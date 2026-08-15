@@ -87,42 +87,26 @@ VERSION ?= $(shell if [ -f VERSION ]; then cat VERSION; elif git describe --tags
 TARGET_BIN ?= $(BIN_DIR)/unroot
 UTIL_BIN ?= $(BIN_DIR)/unroot-util
 UNROOT_UTIL_LIBSUBID ?= auto
-UNROOT_UTIL_LIBARCHIVE ?= auto
+UNROOT_LIBARCHIVE_PROBE_DIR ?= /tmp
 
 ifeq ($(filter $(UNROOT_UTIL_LIBSUBID),auto 0 1),)
 $(error UNROOT_UTIL_LIBSUBID must be auto, 0, or 1)
 endif
-ifeq ($(filter $(UNROOT_UTIL_LIBARCHIVE),auto 0 1),)
-$(error UNROOT_UTIL_LIBARCHIVE must be auto, 0, or 1)
-endif
 
 ifeq ($(UNROOT_UTIL_LIBSUBID),auto)
-UTIL_HAVE_LIBSUBID := $(shell $(CXX) -DUNROOT_PROBE_LIBSUBID scripts/optional_library_probe.cpp -o /dev/null -lsubid >/dev/null 2>&1 && echo 1 || echo 0)
+UTIL_HAVE_LIBSUBID := $(shell $(CXX) scripts/libsubid_probe.cpp -o /dev/null -lsubid >/dev/null 2>&1 && echo 1 || echo 0)
 else
 UTIL_HAVE_LIBSUBID := $(UNROOT_UTIL_LIBSUBID)
 endif
 
-ifeq ($(UNROOT_UTIL_LIBARCHIVE),auto)
-UTIL_HAVE_LIBARCHIVE := $(shell $(CXX) -DUNROOT_PROBE_LIBARCHIVE scripts/optional_library_probe.cpp -o /dev/null -larchive >/dev/null 2>&1 && echo 1 || echo 0)
-else
-UTIL_HAVE_LIBARCHIVE := $(UNROOT_UTIL_LIBARCHIVE)
-endif
-
-UTIL_FEATURE_FLAGS :=
-UTIL_LIBS :=
+UTIL_FEATURE_FLAGS := -pthread
+UTIL_LIBS := -larchive -pthread
 ifeq ($(UTIL_HAVE_LIBSUBID),1)
 UTIL_FEATURE_FLAGS += -DUNROOT_HAVE_LIBSUBID=1
 UTIL_LIBS += -lsubid
 UTIL_IDMAP_BACKEND := libsubid
 else
 UTIL_IDMAP_BACKEND := files
-endif
-ifeq ($(UTIL_HAVE_LIBARCHIVE),1)
-UTIL_FEATURE_FLAGS += -DUNROOT_HAVE_LIBARCHIVE=1
-UTIL_LIBS += -larchive
-UTIL_ARCHIVE_BACKEND := libarchive
-else
-UTIL_ARCHIVE_BACKEND := unavailable
 endif
 
 UTIL_SOURCES := \
@@ -132,12 +116,15 @@ UTIL_SOURCES := \
 	$(SRC_DIR)/util/archive_fd.cpp \
 	$(SRC_DIR)/util/archive_engine.cpp \
 	$(SRC_DIR)/util/archive_inspector.cpp \
+	$(SRC_DIR)/util/archive_progress.cpp \
 	$(SRC_DIR)/util/filesystem_probe.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
 	$(SRC_DIR)/util/subid_backend.cpp
-UTIL_BUILD_DIR := $(BUILD_DIR)/unroot-util/subid-$(UTIL_HAVE_LIBSUBID)-archive-$(UTIL_HAVE_LIBARCHIVE)
+UTIL_BUILD_DIR := $(BUILD_DIR)/unroot-util/subid-$(UTIL_HAVE_LIBSUBID)
 UTIL_OBJECTS := $(addprefix $(UTIL_BUILD_DIR)/,$(UTIL_SOURCES:.cpp=.o))
 UTIL_DEPS := $(UTIL_OBJECTS:.o=.d)
+LIBARCHIVE_PROBE_BIN := $(BUILD_DIR)/libarchive-metadata-probe
+LIBARCHIVE_PROBE_OBJECT := $(UTIL_BUILD_DIR)/scripts/libarchive_metadata_probe.o
 
 # Default target: C++ build + generated docs
 .PHONY: all
@@ -152,7 +139,7 @@ clean:
 	rm -f *.o *.d legacy/*.o legacy/sds/*.o $(BIN_DIR)/unroot $(UTIL_BIN) $(BIN_DIR)/unroot-tests $(BIN_DIR)/unroot-legacy $(BIN_DIR)/unroot-d 2>/dev/null || true; \
 	rm -rf $(BUILD_DIR)/unroot-util 2>/dev/null || true; \
 	rm -rf $(BUILD_DIR)/doctest 2>/dev/null || true; \
-	rm -f $(BUILD_DIR)/version.hpp 2>/dev/null || true
+	rm -f $(BUILD_DIR)/version.hpp $(LIBARCHIVE_PROBE_BIN) 2>/dev/null || true
 
 ## C++ (primary) build
 CPP_SOURCES := \
@@ -293,9 +280,21 @@ $(UTIL_BUILD_DIR)/%.o: %.cpp
 
 $(UTIL_BUILD_DIR)/src/unroot_util.o: $(VERSION_HDR)
 
+# Installed libarchive headers expose these APIs even when their disk metadata
+# backends are disabled, so verify the exact linked library during the build.
+.PHONY: check-libarchive-metadata
+check-libarchive-metadata: $(LIBARCHIVE_PROBE_BIN)
+	@$(LIBARCHIVE_PROBE_BIN) "$(UNROOT_LIBARCHIVE_PROBE_DIR)"
+
+$(LIBARCHIVE_PROBE_BIN): $(LIBARCHIVE_PROBE_OBJECT) $(UTIL_BUILD_DIR)/src/util/filesystem_probe.o
+	@mkdir -p $(@D)
+	$(CXX) $(filter-out -static -MMD -MP,$(CXXFLAGS)) $(CPP_INCLUDES) $^ -o $@ $(filter-out -static,$(LDFLAGS)) -larchive
+
+$(UTIL_BIN): | check-libarchive-metadata
+
 $(UTIL_BIN): $(UTIL_OBJECTS) $(VERSION_HDR)
 	@mkdir -p $(BIN_DIR)
-	@echo "Building unroot-util (idmap: $(UTIL_IDMAP_BACKEND), archive: $(UTIL_ARCHIVE_BACKEND))"
+	@echo "Building unroot-util (idmap: $(UTIL_IDMAP_BACKEND), archive: libarchive)"
 	$(CXX) $(filter-out -static -MMD -MP,$(CXXFLAGS)) $(CPP_INCLUDES) $(UTIL_OBJECTS) -o $@ $(filter-out -static,$(LDFLAGS)) $(UTIL_LIBS)
 	if [ "$(STRIP_BINARY)" = 1 ] && command -v $(STRIP) >/dev/null 2>&1; then \
 	  $(STRIP) -s $@; \

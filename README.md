@@ -203,14 +203,16 @@ $ unroot unpack raspi4-rootfs.tar.xz ~/rootfs
 ```
 
 After unpacking, `unroot unpack` also copies in the host's
-`/etc/resolv.conf` and `/etc/hosts`, so DNS name resolution works as expected. 
-You can see what local files were injected into the rootfs as follows:
+`/etc/resolv.conf` and `/etc/hosts`, so DNS name resolution works as expected.
+It installs `/etc/mtab` as a link to the entered namespace's live mount table.
+You can see the active injections as follows:
 
 ```console
 $ unroot inject list ~/rootfs
 NAME            DESTINATION                 OWNER       MODE    ORIGINAL  CURRENT
 resolv.conf     /etc/resolv.conf            0:0         0644    regular   present
 hosts           /etc/hosts                  0:0         0644    absent    present
+mtab            /etc/mtab                   0:0         0777    symlink   symlink
 ```
 
 The originals they may have overwritten are safely preserved — they
@@ -328,6 +330,12 @@ when active. Compression is selected from the destination suffix (`.gz`, `.xz`,
 `.zst`). Registered injections are replaced by their preserved rootfs originals
 during capture.
 
+On an interactive terminal, archive operations show live progress and average
+throughput in MiB/s. Inspection and extraction report a percentage against the
+known archive size. Packing reports activity and processed data without adding
+a second filesystem walk solely to estimate a total. Progress is automatically
+suppressed when standard error is redirected.
+
 Archives contain the ownership visible inside the managed root, not its shifted
 host representation. This makes `pack` and `unpack` the safe way to copy a rootfs
 between ownership models. For example, turn a rich root into a separate native,
@@ -348,10 +356,11 @@ from archives; incoming archives containing it are rejected.
 
 ## Managing Rootfs Injections
 
-Files copied from the host into a managed rootfs are called *injections*.
-`unpack` registers `hosts` and `resolv.conf` by default, preserving whatever was
-at each destination before installing a writable host copy. The registrations
-are durable: later `enter` commands simply use the current files.
+Host files and compatibility links installed into a managed rootfs are called
+*injections*. `unpack` registers `hosts`, `resolv.conf`, and `mtab` by default,
+preserving whatever was at each destination before installing writable host
+copies and the `/etc/mtab` link to `/proc/self/mounts`. The registrations are
+durable: later `enter` commands simply use the current files and link.
 
 See what is registered:
 
@@ -368,11 +377,12 @@ $ unroot inject remove ~/rootfs hosts
 $ unroot inject add ~/rootfs hosts
 ```
 
-To create a rootfs without one or both defaults, you subtract them at unpack time
-in addition to removing them after with `unroot inject remove`:
+To create a rootfs without one or more defaults, subtract them at unpack time or
+remove them afterward with `unroot inject remove`:
 
 ```console
 $ unroot unpack --inject=-hosts stage3.tar.xz ~/rootfs
+$ unroot unpack --inject=-mtab stage3.tar.xz ~/rootfs
 $ unroot unpack --inject=-* stage3.tar.xz ~/rootfs
 ```
 
@@ -386,9 +396,10 @@ $ unroot inject add ~/rootfs /host/config:/etc/example/config:0:0:0600
 `unroot inject remove` restores the destination that was preserved when the
 registration was first added; `unroot inject clear` restores every registered
 destination. `pack` leaves the live rootfs unchanged but writes those preserved
-portable originals to the archive, so host-specific and custom injected content
-does not leak into the result. See [ROOTFS INJECTIONS](docs/unroot.md#rootfs-injections)
-for the complete file-type, ownership, and lifecycle contract.
+portable originals to the archive, so host-specific files, generated links,
+and custom injected content do not leak into the result. See
+[ROOTFS INJECTIONS](docs/unroot.md#rootfs-injections) for the complete
+file-type, ownership, and lifecycle contract.
 
 Use `unroot inspect archive ARCHIVE` to see the format, ownership range,
 layout, and extended metadata without extracting it. `unroot inspect host`
@@ -456,10 +467,10 @@ and persistent sessions are deliberately outside the initial release. See
 
 ## Installation
 
-Tagged releases provide standalone static `unroot` binaries for x86-64 and
-ARM64, plus target-native packages for Debian 13, Ubuntu 24.04 and 26.04,
-Fedora 44, and Enterprise Linux 9. The native packages install both `unroot`
-and the host-compatible `unroot-util` helper required by managed rich roots.
+Tagged releases provide target-native packages for Debian 13, Ubuntu 24.04
+and 26.04, Fedora 44, and Enterprise Linux 9. Each package installs both the
+static `unroot` engine and the host-compatible, dynamically linked
+`unroot-util` helper required by archive operations and managed rich roots.
 
 Where the target distribution provides one, packages recommend its static QEMU
 user-mode provider. Normal `apt` and Fedora `dnf` installations therefore
@@ -470,9 +481,10 @@ same-architecture operation may deliberately disable recommended or weak
 dependencies. Unroot does not require a distribution-installed host-global
 `binfmt_misc` policy.
 
-The standalone binary remains useful for single-ID and same-architecture native
-rootfs entry. Build from source or install a native package for the complete
-rich rootfs feature set.
+Other distributions can build both executables from the release source archive
+with `make cli` and install them together with `make install`. A complete
+installation always keeps `unroot` and its matching `unroot-util` helper in the
+same binary directory.
 
 ## Requirements
 
@@ -488,8 +500,10 @@ rich rootfs feature set.
   `binfmt_misc` handlers already registered)
 - Host `binfmt_misc` and a trusted static QEMU emulator for native foreign
   execution when no compatible handler is already present
-- A libarchive-enabled `unroot-util` beside `unroot` for archive inspection,
-  `pack`, `unpack`, and injection management
+- `unroot-util` beside `unroot`, with libarchive available at build and runtime,
+  for archive inspection, `pack`, `unpack`, and injection management; every
+  build verifies that the linked libarchive can read and write POSIX ACLs and
+  extended attributes
 - A C++17 compiler and GNU Make when building from source
 
 `make cli` produces a statically linked `bin/unroot` namespace engine and a

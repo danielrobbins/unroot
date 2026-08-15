@@ -83,7 +83,7 @@ void UnpackConfig::configure_parser() {
           })
       .add_multi_option_meta(
           {"--inject"}, "<exclusions>",
-          "Disable default injections, for example -hosts,-resolv.conf or -*",
+          "Disable defaults, for example -hosts,-mtab or -*",
           [this](const std::string& value) {
             std::string error;
             if (!injections::parseUnpackExclusions(

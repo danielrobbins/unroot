@@ -68,6 +68,19 @@ TEST_CASE("Rootfs atomic writes replace rather than follow final symlinks") {
   CHECK(value == "unchanged");
 }
 
+TEST_CASE("Rootfs atomically installs symlinks") {
+  TemporaryTree tree;
+  fs::create_directories(tree.root / "etc");
+  std::ofstream(tree.root / "etc" / "mtab") << "portable";
+  util::Rootfs root(tree.root.string());
+
+  REQUIRE(root.symlinkAtomic("/proc/self/mounts", "/etc/mtab", ::getuid(),
+                             ::getgid()));
+  CHECK(fs::is_symlink(tree.root / "etc" / "mtab"));
+  CHECK(fs::read_symlink(tree.root / "etc" / "mtab") ==
+        fs::path("/proc/self/mounts"));
+}
+
 TEST_CASE("Rootfs mount targets reject final symlinks") {
   TemporaryTree tree;
   fs::path sentinel = tree.outside / "sentinel";

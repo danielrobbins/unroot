@@ -7,7 +7,6 @@ import json
 import os
 import platform
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,15 +67,7 @@ def extract_notes(text: str, version: str) -> str:
     return notes + "\n"
 
 
-def write_checksums(directory: Path, release: Release, required: set[str]) -> Path:
-    prefix = f"unroot-{release.version}-linux-"
-    standalone = sorted(directory.glob(prefix + "*"))
-    architectures = {artifact.name.removeprefix(prefix) for artifact in standalone}
-    if not required.issubset(architectures):
-        raise ValueError(
-            "release architectures do not match: "
-            f"required {sorted(required)}, found {sorted(architectures)}"
-        )
+def write_checksums(directory: Path) -> Path:
     artifacts = sorted(
         artifact
         for artifact in directory.iterdir()
@@ -94,7 +85,7 @@ def write_checksums(directory: Path, release: Release, required: set[str]) -> Pa
     return output
 
 
-def build_artifact(output_dir: Path, architecture: str) -> Path:
+def build_engine(architecture: str) -> Path:
     release = current_release()
     host = normalized_architecture(platform.machine())
     if architecture != host:
@@ -116,11 +107,7 @@ def build_artifact(output_dir: Path, architecture: str) -> Path:
     ).stdout
     if " INTERP " in elf:
         raise ValueError("release binary contains a dynamic interpreter")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    artifact = output_dir / f"unroot-{release.version}-linux-{architecture}"
-    shutil.copy2(binary, artifact)
-    artifact.chmod(0o755)
-    return artifact
+    return binary
 
 
 def write_github_output(path: Path, release: Release) -> None:
@@ -141,18 +128,11 @@ def main() -> int:
     notes = commands.add_parser("notes", help="extract notes for VERSION")
     notes.add_argument("output", type=Path)
 
-    build = commands.add_parser("build", help="build one native static artifact")
+    build = commands.add_parser("build", help="build and verify the static engine")
     build.add_argument("--architecture", required=True, choices={"x86_64", "arm64"})
-    build.add_argument("--output-dir", type=Path, default=ROOT / "dist")
 
     checksums = commands.add_parser("checksums", help="hash assembled artifacts")
     checksums.add_argument("directory", type=Path)
-    checksums.add_argument(
-        "--require-architecture",
-        action="append",
-        choices={"x86_64", "arm64"},
-        required=True,
-    )
 
     args = parser.parse_args()
     if args.command == "metadata":
@@ -167,14 +147,10 @@ def main() -> int:
             extract_notes(text, release.version), encoding="utf-8"
         )
     elif args.command == "build":
-        print(build_artifact(args.output_dir, args.architecture))
+        print(build_engine(args.architecture))
     else:
-        release = current_release()
-        print(
-            write_checksums(
-                args.directory, release, set(args.require_architecture)
-            )
-        )
+        current_release()
+        print(write_checksums(args.directory))
     return 0
 
 

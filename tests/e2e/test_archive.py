@@ -376,7 +376,7 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
     _assert_payload_tree(restored)
 
 
-def test_pack_restores_portable_network_configuration(
+def test_pack_restores_portable_injection_originals(
     unroot: UnrootRunner,
     tmp_path: Path,
     privileged_prefix: tuple[str, ...],
@@ -391,6 +391,9 @@ def test_pack_restores_portable_network_configuration(
         "nameserver 192.0.2.1\n", encoding="utf-8"
     )
     (source / "etc" / "resolv.conf").symlink_to("../run/resolv.conf")
+    (source / "etc" / "mtab").write_text(
+        "portable mount table\n", encoding="utf-8"
+    )
     input_archive = tmp_path / "input.tar"
     _create_archive(source, input_archive)
     root = tmp_path / "root"
@@ -403,6 +406,8 @@ def test_pack_restores_portable_network_configuration(
     assert (root / "etc" / "resolv.conf").read_text(
         encoding="utf-8"
     ) == Path("/etc/resolv.conf").read_text(encoding="utf-8")
+    assert (root / "etc" / "mtab").readlink() == Path("/proc/self/mounts")
+    assert os.lstat(root / "etc" / "mtab").st_uid == 0
     archive = tmp_path / "network-config.tar"
 
     _run_unroot(
@@ -413,11 +418,26 @@ def test_pack_restores_portable_network_configuration(
         members = {member.name.removeprefix("./"): member for member in packed}
         assert "etc/resolv.conf" in members
         assert "etc/hosts" not in members
+        assert "etc/mtab" in members
         assert members["etc/resolv.conf"].issym()
         assert members["etc/resolv.conf"].linkname == "../run/resolv.conf"
+        assert members["etc/mtab"].isfile()
+        mount_table = packed.extractfile(members["etc/mtab"])
+        assert mount_table is not None
+        assert mount_table.read() == b"portable mount table\n"
         resolver = packed.extractfile(members["run/resolv.conf"])
         assert resolver is not None
         assert resolver.read() == b"nameserver 192.0.2.1\n"
+
+    _run_unroot(
+        unroot,
+        ["inject", "remove", str(root), "mtab"],
+        {},
+        privileged_prefix,
+    ).assert_ok()
+    assert (root / "etc" / "mtab").read_text(
+        encoding="utf-8"
+    ) == "portable mount table\n"
 
 
 def test_native_managed_root_supports_durable_custom_injection(

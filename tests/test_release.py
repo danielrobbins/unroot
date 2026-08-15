@@ -47,29 +47,8 @@ def test_current_release_notes_match_version():
     assert release.extract_notes(notes, version)
 
 
-def test_checksums_require_and_hash_complete_architecture_set(tmp_path):
-    metadata = release.release_metadata("1.0_beta1")
-    contents = {"x86_64": b"x86 artifact", "arm64": b"arm artifact"}
-    for architecture, data in contents.items():
-        (tmp_path / f"unroot-1.0_beta1-linux-{architecture}").write_bytes(data)
-
-    output = release.write_checksums(
-        tmp_path, metadata, {"x86_64", "arm64"}
-    )
-
-    assert output.read_text(encoding="ascii").splitlines() == [
-        f"{hashlib.sha256(contents['arm64']).hexdigest()}  "
-        "unroot-1.0_beta1-linux-arm64",
-        f"{hashlib.sha256(contents['x86_64']).hexdigest()}  "
-        "unroot-1.0_beta1-linux-x86_64",
-    ]
-
-
 def test_checksums_cover_packages_and_source_but_not_release_notes(tmp_path):
-    metadata = release.release_metadata("1.0_beta1")
     contents = {
-        "unroot-1.0_beta1-linux-arm64": b"arm artifact",
-        "unroot-1.0_beta1-linux-x86_64": b"x86 artifact",
         "unroot-1.0_beta1.tar.xz": b"source",
         "unroot_1.0~beta1-1~debian13.1_amd64.deb": b"deb",
         "unroot-1.0-0.1.beta1.fc44.x86_64.rpm": b"rpm",
@@ -78,9 +57,7 @@ def test_checksums_cover_packages_and_source_but_not_release_notes(tmp_path):
         (tmp_path / name).write_bytes(data)
     (tmp_path / "release-notes.md").write_text("notes", encoding="utf-8")
 
-    output = release.write_checksums(
-        tmp_path, metadata, {"x86_64", "arm64"}
-    )
+    output = release.write_checksums(tmp_path)
 
     assert output.read_text(encoding="ascii").splitlines() == [
         f"{hashlib.sha256(contents[name]).hexdigest()}  {name}"
@@ -88,12 +65,11 @@ def test_checksums_cover_packages_and_source_but_not_release_notes(tmp_path):
     ]
 
 
-def test_checksums_reject_incomplete_architecture_set(tmp_path):
-    metadata = release.release_metadata("1.0_beta1")
-    (tmp_path / "unroot-1.0_beta1-linux-x86_64").write_bytes(b"binary")
+def test_checksums_reject_empty_release_bundle(tmp_path):
+    (tmp_path / "release-notes.md").write_text("notes", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="do not match"):
-        release.write_checksums(tmp_path, metadata, {"x86_64", "arm64"})
+    with pytest.raises(ValueError, match="no artifacts"):
+        release.write_checksums(tmp_path)
 
 
 def test_workflow_actions_are_pinned_and_publish_is_narrowly_privileged():
@@ -109,6 +85,7 @@ def test_workflow_actions_are_pinned_and_publish_is_narrowly_privileged():
     assert "contents: write" not in build
     assert "permissions:\n      contents: write" in publish
     assert "actions/checkout@" not in publish
+    assert "unroot-binary-" not in release_workflow
 
 
 def test_public_docs_match_the_initial_release_surface():

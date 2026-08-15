@@ -67,13 +67,14 @@ FD`. The helper accepts only the inherited descriptor, scans headers through
 libarchive, and returns objective archive facts. It never receives an
 archive-controlled host pathname.
 
-Injection operations follow the same descriptor-first boundary. The engine
-opens and pins the host source file, chooses the rootfs destination, ownership,
-mode, ID map, and preservation paths, then passes the inherited source
-descriptor to `unroot-util`. The helper runs inside the selected ownership
-namespace with the pinned root as its working directory. It performs only the
-requested rooted, atomic file replacement or restoration; it never discovers
-host sources or chooses injection policy.
+Injection operations follow the same descriptor-first boundary for host files.
+The engine opens and pins each host source, or selects a literal built-in
+symlink target, then chooses the rootfs destination, ownership, mode, ID map,
+and preservation paths. `unroot-util` receives only that fixed payload and
+policy. It runs inside the selected ownership namespace with the pinned root as
+its working directory and performs only the requested rooted, atomic file or
+symlink replacement or restoration; it never discovers host sources or chooses
+injection policy.
 
 Destination-filesystem inspection is also descriptor-first. Before extracting
 POSIX ACLs or extended attributes, the engine passes the pinned root directory
@@ -126,10 +127,8 @@ binary directory. Distribution packages should install both, build the helper
 with libarchive, and provide libsubid's development interface when the target
 distribution supports non-file subordinate-ID providers.
 
-The standalone static release binary remains sufficient for `enter --single`
-and same-architecture native execution. Managed rich roots and archive
-operations require a host-built or distribution-built `unroot-util`, because
-distributing one generic dynamically linked helper would defeat the purpose of
-integrating with the target host runtime. The helper also builds against musl;
-without a compatible libsubid interface it uses the local subordinate-ID file
-backend.
+GitHub releases distribute complete installations through target-native
+packages or as source. A generic binary bundle would pair the portable static
+engine with an `unroot-util` built against another distribution's host runtime,
+defeating the helper boundary. The helper also builds against musl; without a
+compatible libsubid interface it uses the local subordinate-ID file backend.

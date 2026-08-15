@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <iostream>
+#include <optional>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string>
@@ -25,9 +26,9 @@ namespace {
 void usage() {
     std::cerr << "Usage: unroot-util idmap --count COUNT\n"
                  "       unroot-util idmap --validate UID_START GID_START COUNT\n"
-                 "       unroot-util archive inspect --fd FD\n"
-                 "       unroot-util archive unpack --fd FD\n"
-                 "       unroot-util archive pack --fd FD --filter FILTER\n"
+                 "       unroot-util archive inspect --fd FD [--progress-fd FD --progress-style STYLE]\n"
+                 "       unroot-util archive unpack --fd FD [--force] [--progress-fd FD --progress-style STYLE]\n"
+                 "       unroot-util archive pack --fd FD --filter FILTER [--progress-fd FD --progress-style STYLE]\n"
                  "       unroot-util filesystem inspect --fd FD\n"
                  "       unroot-util injection install ...\n"
                  "       unroot-util injection restore ...\n"
@@ -39,6 +40,33 @@ bool parseId(const char* text, unsigned int& value) {
     auto parsed = std::from_chars(text, end, value);
     return parsed.ec == std::errc() && parsed.ptr == end;
 }
+
+struct ProgressArguments {
+    int descriptor = -1;
+    std::optional<util::ProgressStyle> style;
+
+    bool consume(const std::string& option, const char* value) {
+        if (option == "--progress-fd") {
+            unsigned int parsed = 0;
+            if (descriptor >= 0 || !parseId(value, parsed) ||
+                parsed <= STDERR_FILENO || parsed > INT_MAX)
+                return false;
+            descriptor = static_cast<int>(parsed);
+            return true;
+        }
+        if (option == "--progress-style" && !style) {
+            style = util::parseProgressStyle(value);
+            return style.has_value();
+        }
+        return false;
+    }
+
+    bool valid() const { return (descriptor >= 0) == style.has_value(); }
+
+    util::ProgressStyle selectedStyle() const {
+        return style.value_or(util::ProgressStyle::Ascii);
+    }
+};
 
 int filesystemCommand(int argc, char** argv) {
     unsigned int descriptor = 0;
@@ -61,24 +89,37 @@ int archiveCommand(int argc, char** argv) {
     if (!std::setlocale(LC_CTYPE, "C.UTF-8"))
         std::setlocale(LC_CTYPE, "C.utf8");
     if (argc == 3 && std::string(argv[2]) == "--version") {
-        const std::string version = util::archiveLibraryVersion();
-        if (version.empty()) {
-            std::cerr << "archive inspection requires libarchive support\n";
-            return 1;
-        }
-        std::cout << archiveinfo::Protocol << ' ' << version << '\n';
+        std::cout << archiveinfo::Protocol << ' '
+                  << util::archiveLibraryVersion() << '\n';
         return 0;
     }
     unsigned int descriptor = 0;
     const std::string operation = argc >= 3 ? argv[2] : "";
-    const bool force = operation == "unpack" && argc == 6 &&
-                       std::string(argv[5]) == "--force";
     if ((operation == "inspect" || operation == "unpack") &&
-        (argc == 5 || force) &&
+        argc >= 5 &&
         std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
         descriptor <= INT_MAX) {
+        bool force = false;
+        ProgressArguments progress;
+        for (int index = 5; index < argc;) {
+            const std::string option = argv[index++];
+            if (operation == "unpack" && option == "--force" && !force) {
+                force = true;
+                continue;
+            }
+            if (index >= argc || !progress.consume(option, argv[index++])) {
+                usage();
+                return 2;
+            }
+        }
+        if (!progress.valid()) {
+            usage();
+            return 2;
+        }
         if (operation == "inspect") {
-            auto result = util::inspectArchive(static_cast<int>(descriptor));
+            auto result = util::inspectArchive(static_cast<int>(descriptor),
+                                               progress.descriptor,
+                                               progress.selectedStyle());
             if (!result) {
                 std::cerr << result.error << '\n';
                 return 1;
@@ -87,8 +128,9 @@ int archiveCommand(int argc, char** argv) {
             return 0;
         }
         std::string error;
-        const int result =
-            util::unpackArchive(static_cast<int>(descriptor), force, error);
+        const int result = util::unpackArchive(
+            static_cast<int>(descriptor), force, error, progress.descriptor,
+            progress.selectedStyle());
         if (!error.empty())
             std::cerr << (result == 0 ? "Warning: " : "") << error << '\n';
         return result;
@@ -97,11 +139,16 @@ int archiveCommand(int argc, char** argv) {
         std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
         descriptor <= INT_MAX && std::string(argv[5]) == "--filter") {
         bool packForce = false;
+        ProgressArguments progress;
         std::vector<std::string> excludes;
         std::vector<archiveio::Substitution> substitutions;
         for (int index = 7; index < argc;) {
             const std::string option = argv[index++];
             if (option == "--force") {
+                if (packForce) {
+                    usage();
+                    return 2;
+                }
                 packForce = true;
                 continue;
             }
@@ -110,7 +157,12 @@ int archiveCommand(int argc, char** argv) {
                 return 2;
             }
             const std::string value = argv[index++];
-            if (option == "--exclude") {
+            if (option == "--progress-fd" || option == "--progress-style") {
+                if (!progress.consume(option, value.c_str())) {
+                    usage();
+                    return 2;
+                }
+            } else if (option == "--exclude") {
                 excludes.push_back(value);
             } else if (option == "--substitute") {
                 const auto separator = value.find('=');
@@ -126,10 +178,16 @@ int archiveCommand(int argc, char** argv) {
                 return 2;
             }
         }
+        if (!progress.valid()) {
+            usage();
+            return 2;
+        }
         std::string error;
         const int result = util::packArchive(static_cast<int>(descriptor),
                                              argv[6], excludes, substitutions,
-                                             packForce, error);
+                                             packForce, error,
+                                             progress.descriptor,
+                                             progress.selectedStyle());
         if (!error.empty())
             std::cerr << (result == 0 ? "Warning: " : "") << error << '\n';
         return result;
@@ -204,9 +262,11 @@ int injectionCommand(int argc, char** argv) {
     unsigned int uid = 0;
     unsigned int gid = 0;
     unsigned int mode = 0;
+    const bool regular = argc == 19 && std::string(argv[3]) == "--fd";
+    const bool symlink = argc == 19 && std::string(argv[3]) == "--target";
     if (operation != "install" || argc != 19 ||
-        std::string(argv[3]) != "--fd" ||
-        !parseId(argv[4], descriptor) || descriptor > INT_MAX ||
+        (!regular && !symlink) ||
+        (regular && (!parseId(argv[4], descriptor) || descriptor > INT_MAX)) ||
         std::string(argv[5]) != "--destination" ||
         std::string(argv[7]) != "--backup" ||
         std::string(argv[9]) != "--absent" ||
@@ -220,10 +280,20 @@ int injectionCommand(int argc, char** argv) {
     }
 
     util::Rootfs root(".");
+    if (!root) {
+        std::cerr << "unable to open injection rootfs\n";
+        return 1;
+    }
     struct stat source {};
-    if (!root || ::fstat(static_cast<int>(descriptor), &source) != 0 ||
-        !S_ISREG(source.st_mode)) {
+    if (regular && (::fstat(static_cast<int>(descriptor), &source) != 0 ||
+                    !S_ISREG(source.st_mode))) {
         std::cerr << "injection source is not a regular file\n";
+        return 1;
+    }
+    const std::string payload = argv[4];
+    if (symlink && (payload.empty() || payload.front() != '/' ||
+                    payload.find('\n') != std::string::npos)) {
+        std::cerr << "injection symlink target is invalid\n";
         return 1;
     }
     const std::string destination = argv[6];
@@ -273,9 +343,13 @@ int injectionCommand(int argc, char** argv) {
         return 1;
     }
 
-    if (root.copyFileAtomic(static_cast<int>(descriptor), destination,
-                            static_cast<uid_t>(uid), static_cast<gid_t>(gid),
-                            static_cast<mode_t>(mode)))
+    const bool installed = regular
+        ? root.copyFileAtomic(static_cast<int>(descriptor), destination,
+                              static_cast<uid_t>(uid), static_cast<gid_t>(gid),
+                              static_cast<mode_t>(mode))
+        : root.symlinkAtomic(payload, destination, static_cast<uid_t>(uid),
+                             static_cast<gid_t>(gid));
+    if (installed)
         return 0;
     if (captured) {
         const std::string capturedType = root.lstat(backup, target)

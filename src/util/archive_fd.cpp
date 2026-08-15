@@ -24,4 +24,11 @@ UniqueFd reopenArchiveDescriptor(int descriptor, int flags,
   return reopened;
 }
 
+uint64_t archiveDescriptorSize(int descriptor) {
+  struct stat info {};
+  return ::fstat(descriptor, &info) == 0 && info.st_size > 0
+             ? static_cast<uint64_t>(info.st_size)
+             : 0;
+}
+
 }  // namespace util

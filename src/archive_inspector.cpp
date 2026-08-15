@@ -2,8 +2,10 @@
 
 #include <cctype>
 #include <utility>
+#include <vector>
 
 #include "util/host_helper.hpp"
+#include "util/progress_output.hpp"
 
 namespace archiveio {
 namespace {
@@ -20,9 +22,12 @@ std::string trim(std::string text) {
 InspectionResult Inspector::inspect(const Input& input) const {
   UniqueFd descriptor = input.duplicateForChild();
   if (!descriptor) return {{}, "unable to prepare archive for inspection"};
-  auto response = util::runHostHelper(
-      {"archive", "inspect", "--fd", std::to_string(descriptor.get())},
-      archiveinfo::ResponseLimit);
+  std::vector<std::string> arguments{
+      "archive", "inspect", "--fd", std::to_string(descriptor.get())};
+  util::ProgressOutput progress;
+  progress.appendTo(arguments);
+  auto response =
+      util::runHostHelper(arguments, archiveinfo::ResponseLimit);
   std::string output = trim(std::move(response.output));
   if (!response.error.empty()) return {{}, std::move(response.error)};
   if (response.truncated) return {{}, "oversized response from unroot-util"};

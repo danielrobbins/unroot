@@ -32,13 +32,13 @@ resident container daemon.
 %setup -q -n unroot-@SOURCE_VERSION@
 
 %build
-make %{?_smp_mflags} all UNROOT_UTIL_LIBARCHIVE=1
+make %{?_smp_mflags} all
 
 %install
-make install DESTDIR=%{buildroot} PREFIX=/usr UNROOT_UTIL_LIBARCHIVE=1
+make install DESTDIR=%{buildroot} PREFIX=/usr
 
 %check
-make %{?_smp_mflags} test STRIP_BINARY=0 UNROOT_UTIL_LIBARCHIVE=1
+make %{?_smp_mflags} test STRIP_BINARY=0
 python3 -m pytest -q tests/test_docatoms.py tests/test_packaging.py tests/test_release.py
 
 %files

@@ -80,7 +80,7 @@ jobs:
           printf 'UNROOT_E2E_FUNTOO_NAME=%s\n' "${{ matrix.name }}" >> "$GITHUB_ENV"
           printf 'UNROOT_E2E_FUNTOO_CHOST=%s\n' "${{ matrix.chost }}" >> "$GITHUB_ENV"
       - name: Build Unroot
-        run: make cli UNROOT_UTIL_LIBARCHIVE=1 UNROOT_UTIL_LIBSUBID=1
+        run: make cli UNROOT_UTIL_LIBSUBID=1
       - name: Run the Funtoo rootfs journey
         env:
           UNROOT_E2E_STRICT: "1"

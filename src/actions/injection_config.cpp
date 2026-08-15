@@ -67,8 +67,8 @@ namespace {
 const bool inject_registered = []() {
   actions::ActionRegistry::register_action(
       "inject", actions::InjectionConfig::handle,
-      "Inspect and manage files injected into a managed rootfs",
-      "Use list, add, remove, or clear to manage durable writable copies while "
+      "Inspect and manage content injected into a managed rootfs",
+      "Use list, add, remove, or clear to manage durable files and links while "
       "preserving the portable rootfs originals.",
       "OPERATION ROOT [ITEM...] [OPTIONS]",
       []() { return std::make_unique<actions::InjectionConfig>(); });
