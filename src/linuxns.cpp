@@ -263,21 +263,23 @@ static bool bindRootfsTarget(const util::Rootfs& root, const char* src,
   return protectedMount;
 }
 
+static bool bindRootfsSelf(const util::Rootfs& root) {
+  // Equivalent to mount --bind ROOT ROOT: make the entered root a mountpoint.
+  std::string pinnedRoot = util::Rootfs::fdPath(root.fd());
+  return mountBind(pinnedRoot.c_str(), pinnedRoot, true, "bind:rootfs", true,
+                   "rootfs mountpoint");
+}
+
 static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
                         const EmuPlan* emu,
                         const std::vector<BindMap>* maps) {
-  // Equivalent to mount --bind ROOT ROOT: make the entered root a mountpoint.
-  std::string pinnedRoot = util::Rootfs::fdPath(root.fd());
-  if (!mountBind(pinnedRoot.c_str(), pinnedRoot, false, "bind:rootfs", true,
-                 "rootfs mountpoint"))
-    return false;
-
   // Optional emulator bind (for cross-arch without binfmt): host file -> /tmp/unroot/<name> in rootfs
   if (emu && !emu->source.empty() && !emu->target.empty()) {
     std::string note = std::string("static emulator: src=") + emu->source +
                        " dst=" + emu->target;
-    if (!bindRootfsTarget(root, emu->source.c_str(), emu->target, false, false,
-                          true, "bind:emu", true, note.c_str())) return false;
+    if (!bindRootfsTarget(root, emu->source.c_str(), emu->target, false,
+                          false, true, "bind:emu", true, note.c_str()))
+      return false;
   }
   // User-requested map binds (enforced): abort on failure
   if (maps) {
@@ -471,10 +473,13 @@ SetupResult setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* 
     
     if (!rootfs.empty()) {
         util::Rootfs root(rootfs);
-        if (!root || root.isHostRoot() || !setupRootfs(root, opts, emu, maps))
+      if (!root || root.isHostRoot() || !bindRootfsSelf(root))
+        return {105, errno};
+      util::Rootfs mountedRoot(rootfs);
+      if (!mountedRoot || !setupRootfs(mountedRoot, opts, emu, maps) ||
+        ::fchdir(mountedRoot.fd()) != 0 || ::chroot(".") != 0 ||
+        ::chdir("/") != 0)
             return {105, errno};
-        if (::fchdir(root.fd()) != 0 || ::chroot(".") != 0 ||
-            ::chdir("/") != 0) return {105, errno};
     }
     
     setupPostChrootMounts(opts, rootfs.empty());

@@ -1,3 +1,11 @@
+# Unroot 1.0.5
+
+**Bug Fix Release** -- August 15, 2026.
+
+Unroot 1.0.5 fixes a root mount regression introduced in `1.0.4` while preserving unprivileged `unroot enter` behavior.
+
+- Rootfs mount setup was corrected so the entered root consistently behaves as `/`, including when paths traverse through top-level directories such as `/etc/../proc`. This restores compatibility with relative `/etc/mtab` links and preserves visibility of existing nested submounts beneath the target root. Regression coverage now explicitly checks both preserved submount visibility and relative `/etc/mtab` compatibility. ([#36](https://github.com/danielrobbins/unroot/issues/36))
+
 # Unroot 1.0.4
 
 **Feature and Bug Fix Release** -- August 14, 2026.
