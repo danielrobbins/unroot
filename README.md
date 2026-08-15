@@ -456,10 +456,10 @@ and persistent sessions are deliberately outside the initial release. See
 
 ## Installation
 
-Tagged releases provide standalone static `unroot` binaries for x86-64 and
-ARM64, plus target-native packages for Debian 13, Ubuntu 24.04 and 26.04,
-Fedora 44, and Enterprise Linux 9. The native packages install both `unroot`
-and the host-compatible `unroot-util` helper required by managed rich roots.
+Tagged releases provide target-native packages for Debian 13, Ubuntu 24.04
+and 26.04, Fedora 44, and Enterprise Linux 9. Each package installs both the
+static `unroot` engine and the host-compatible, dynamically linked
+`unroot-util` helper required by archive operations and managed rich roots.
 
 Where the target distribution provides one, packages recommend its static QEMU
 user-mode provider. Normal `apt` and Fedora `dnf` installations therefore
@@ -470,9 +470,10 @@ same-architecture operation may deliberately disable recommended or weak
 dependencies. Unroot does not require a distribution-installed host-global
 `binfmt_misc` policy.
 
-The standalone binary remains useful for single-ID and same-architecture native
-rootfs entry. Build from source or install a native package for the complete
-rich rootfs feature set.
+Other distributions can build both executables from the release source archive
+with `make cli` and install them together with `make install`. A complete
+installation always keeps `unroot` and its matching `unroot-util` helper in the
+same binary directory.
 
 ## Requirements
 

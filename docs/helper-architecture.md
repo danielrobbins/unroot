@@ -126,10 +126,8 @@ binary directory. Distribution packages should install both, build the helper
 with libarchive, and provide libsubid's development interface when the target
 distribution supports non-file subordinate-ID providers.
 
-The standalone static release binary remains sufficient for `enter --single`
-and same-architecture native execution. Managed rich roots and archive
-operations require a host-built or distribution-built `unroot-util`, because
-distributing one generic dynamically linked helper would defeat the purpose of
-integrating with the target host runtime. The helper also builds against musl;
-without a compatible libsubid interface it uses the local subordinate-ID file
-backend.
+GitHub releases distribute complete installations through target-native
+packages or as source. A generic binary bundle would pair the portable static
+engine with an `unroot-util` built against another distribution's host runtime,
+defeating the helper boundary. The helper also builds against musl; without a
+compatible libsubid interface it uses the local subordinate-ID file backend.
