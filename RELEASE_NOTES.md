@@ -1,3 +1,15 @@
+# Unroot 1.0.4
+
+**Feature and Bug Fix Release** -- August 14, 2026.
+
+Unroot 1.0.4 strengthens Linux distribution compatibility, closes a remaining archive metadata-safety gap and adds progress bars for packing and unpacking!
+
+- An entered rootfs now appears as `/` in its own mount table, giving package managers and other tools the conventional root mount entry they expect. ([#33](https://github.com/danielrobbins/unroot/issues/33))
+- `/etc/mtab` is now a default, reversible injection pointing to `/proc/self/mounts`. Any original file or symlink is preserved for removal and packing. ([#34](https://github.com/danielrobbins/unroot/issues/34))
+- `unroot` source builds now perform a build-time check to ensure that `libarchive` is built with support for POSIX ACLs and extended attributes. This addresses a bug that could cause silent metadata loss. ([#32](https://github.com/danielrobbins/unroot/issues/32))
+- GitHub release downloads no longer include standalone `unroot` binaries. A functional installation needs both the static `unroot` engine and its host-linked `unroot-util` helper, so it's recommended to use a prebuilt distro package or build from source.
+- Interactive archive inspection, unpacking, and packing now display compact, terminal-aware progress with average throughput in MiB/s.
+
 # Unroot 1.0.3
 
 **Features Release** — August 13, 2026
@@ -13,7 +25,7 @@ A number of improvements have been made to `unroot` to improve usability and mak
 - `unroot unpack` will always do a single pre-flight scan of the to-be-unpacked archive; when it finds POSIX ACLs or extended attributes, `unpack` now performs a quick check for the corresponding support on the exact destination filesystem before extraction begins. If necessary features are not present, `unpack` aborts prior to extraction. This can be overridden with `--force`.
 - `/etc/resolv.conf` and `/etc/hosts` are now *injected* (safely copied) into managed (non-native) rootfs environments using the novel `inject` action. They were previously read-only bind-mounted so could not be altered. This new method allows local name resolution to work while allowing local edits to the files, and prevents local network configuration from leaking into packed rootfs tarballs. This also provides a framework for customizing other injectable files that you want inserted into the unpacked rootfs by default, but don't want to become part of the packed/distributed rootfs.
 - `pack` and `unpack` now take one self-cleaning exclusive lock per rootfs, so archive reads and writes cannot overlap on the same tree. A competing command fails immediately, while process exit automatically releases ownership and leaves no stale lock file. ([#27](https://github.com/danielrobbins/unroot/issues/27))
-- For now, OCI images are rejected until we add support. [#25](https://github.com/danielrobbins/unroot/issues/25))
+- For now, OCI images are rejected until we add support. ([#25](https://github.com/danielrobbins/unroot/issues/25))
 - `enter` rejects paths that resolve to the host `/`.
 
 # Unroot 1.0.2
@@ -184,15 +196,17 @@ Use unroot with root filesystems and commands you trust.
 
 ## What's Included
 
-**Binaries:**
-- `unroot` — Static namespace engine (x86-64 and ARM64)
-- `unroot-util` — Dynamic helper for rich roots (included in packages)
+**Source:** A release archive for building the static `unroot` engine and its
+host-compatible `unroot-util` helper together.
 
 **Packages:** Native `.deb` and `.rpm` packages for:
 - Debian 13 (Bookworm)
 - Ubuntu 24.04 LTS and 26.04
 - Fedora 44
 - Enterprise Linux 9 (Rocky Linux 9)
+
+Each native package installs both `unroot` and `unroot-util` with the helper's
+required host-library dependencies.
 
 **QEMU:** Packages recommend the distribution's static QEMU user-mode emulator
 for multi-architecture support, but it's not required — unroot works without it
