@@ -269,6 +269,12 @@ static bool bindRootfsTarget(const util::Rootfs& root, const char* src,
 static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
                         const EmuPlan* emu,
                         const std::vector<BindMap>* maps) {
+  // Equivalent to mount --bind ROOT ROOT: make the entered root a mountpoint.
+  std::string pinnedRoot = util::Rootfs::fdPath(root.fd());
+  if (!mountBind(pinnedRoot.c_str(), pinnedRoot, false, "bind:rootfs", true,
+                 "rootfs mountpoint"))
+    return false;
+
   // Optional emulator bind (for cross-arch without binfmt): host file -> /tmp/unroot/<name> in rootfs
   if (emu && !emu->source.empty() && !emu->target.empty()) {
     std::string note = std::string("static emulator: src=") + emu->source +

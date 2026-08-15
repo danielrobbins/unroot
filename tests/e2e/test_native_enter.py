@@ -203,6 +203,33 @@ def test_enter_single_has_usable_procfs(
     assert result.stdout == "proc-ok"
 
 
+def test_enter_single_has_root_mount_entry(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for root mount coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-mount", busybox)
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "awk",
+        '$2 == "/" { found = 1 } END { exit !found }',
+        "/proc/self/mounts",
+    )
+
+    result.assert_ok()
+
+
 def test_enter_single_has_readonly_sysfs_and_inherited_term(
     unroot: UnrootRunner,
     tmp_path: Path,
@@ -316,6 +343,22 @@ def test_managed_rooted_execution(unroot: UnrootRunner, managed_rootfs: Path) ->
         'printf "%s:%s:%s" "$(id -u)" "$PWD" "$E2E_VALUE"',
     ).assert_ok()
     assert result.stdout == "0:/tmp:ok"
+
+
+def test_managed_rootfs_has_root_mount_entry(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "awk",
+        '$2 == "/" { found = 1 } END { exit !found }',
+        "/proc/self/mounts",
+    )
+
+    result.assert_ok()
 
 
 def test_managed_rootfs_can_allocate_pty(
@@ -956,6 +999,50 @@ test "$(cat "$1/nested/value")" = original
             script,
             "sh",
             str(source),
+            str(root),
+            str(unroot.binary),
+        ]
+    )
+
+    assert result.returncode == 0, result.diagnostic()
+
+
+def test_root_mount_preserves_existing_submount(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    unshare = shutil.which("unshare")
+    mount = shutil.which("mount")
+    require_capability(
+        unshare is not None and mount is not None,
+        "unshare and mount are required for nested rootfs mount coverage",
+    )
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for nested rootfs mount coverage",
+    )
+    root = create_rootfs(tmp_path / "native-root", busybox)
+    (root / "tmp" / "nested").mkdir()
+    script = r"""
+set -eu
+mount --make-rprivate /
+mount -t tmpfs tmpfs "$1/tmp/nested"
+trap 'umount "$1/tmp/nested"' EXIT
+printf visible > "$1/tmp/nested/marker"
+test "$("$2" enter --native "$1" -- /bin/busybox cat /tmp/nested/marker)" = visible
+"""
+    result = run_command(
+        [
+            *privileged_prefix,
+            unshare,
+            "--mount",
+            "sh",
+            "-c",
+            script,
+            "sh",
             str(root),
             str(unroot.binary),
         ]
