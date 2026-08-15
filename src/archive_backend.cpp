@@ -11,6 +11,7 @@
 
 #include "linuxns.hpp"
 #include "util/host_helper.hpp"
+#include "util/progress_output.hpp"
 
 namespace archive {
 namespace {
@@ -87,6 +88,8 @@ int Backend::create(const fs::path& root, const util::IdMapPlan& idmap,
     arguments.push_back(item.source + "=" + item.destination);
   }
   if (force) arguments.push_back("--force");
+  util::ProgressOutput progress;
+  progress.appendTo(arguments);
   return run(root, idmap, std::move(arguments));
 }
 
@@ -97,6 +100,8 @@ int Backend::extract(const fs::path& root, const util::IdMapPlan& idmap,
   std::vector<std::string> arguments{
       helper_, "archive", "unpack", "--fd", std::to_string(archive.get())};
   if (force) arguments.push_back("--force");
+  util::ProgressOutput progress;
+  progress.appendTo(arguments);
   return run(root, idmap, std::move(arguments));
 }
 

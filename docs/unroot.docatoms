@@ -95,6 +95,8 @@ After extraction, `unpack` installs writable copies of the host's `/etc/hosts` a
 
 `unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.
 
+When standard error is an interactive terminal, archive operations display live progress and average logical throughput in MiB/s. Inspection and extraction show determinate progress against the pinned archive input. Packing reports an indeterminate activity bar, the amount processed, and throughput because the final archive workload is not known without an additional rootfs traversal. Progress output is automatically omitted when standard error is redirected.
+
 Only one `pack`, `unpack`, or `inject` operation may manage a rootfs at a time. These actions take an exclusive operating-system lock on the pinned root directory and fail immediately when another rootfs-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. `enter` does not mutate the injection registry and does not require this lock.
 
 `pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:

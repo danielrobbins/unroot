@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "archive_fd.hpp"
+#include "archive_progress.hpp"
 
 namespace util {
 
@@ -75,27 +76,28 @@ bool writeData(struct archive* destination, const void* data, size_t size,
 }
 
 int copyData(struct archive* source, struct archive* destination,
-             std::string& message) {
+             ArchiveProgress& progress, std::string& message) {
   static constexpr std::array<char, 64 * 1024> zeros{};
   const void* data = nullptr;
   size_t size = 0;
   la_int64_t offset = 0;
-  la_int64_t progress = 0;
+  la_int64_t position = 0;
   int status;
   while ((status = archive_read_data_block(source, &data, &size, &offset)) ==
          ARCHIVE_OK) {
-    if (offset < progress) {
+    if (offset < position) {
       message = "archive disk reader returned overlapping data";
       return 1;
     }
-    while (progress < offset) {
+    while (position < offset) {
       const size_t amount = static_cast<size_t>(
-          std::min<la_int64_t>(offset - progress, zeros.size()));
+          std::min<la_int64_t>(offset - position, zeros.size()));
       if (!writeData(destination, zeros.data(), amount, message)) return 1;
-      progress += static_cast<la_int64_t>(amount);
+      position += static_cast<la_int64_t>(amount);
     }
     if (!writeData(destination, data, size, message)) return 1;
-    progress += static_cast<la_int64_t>(size);
+    position += static_cast<la_int64_t>(size);
+    progress.update(destination);
   }
   return status == ARCHIVE_EOF ? 0 : archiveFailure(source, message);
 }
@@ -105,7 +107,8 @@ using FileLinks = std::map<FileId, std::string>;
 
 bool writeEntry(struct archive* disk, struct archive* writer,
                 struct archive_entry* entry, const std::string& name,
-                FileLinks& links, bool force, std::string& message) {
+                FileLinks& links, ArchiveProgress& progress, bool force,
+                std::string& message) {
   archive_entry_set_pathname(entry, name.c_str());
   if (archive_entry_filetype(entry) != AE_IFREG)
     archive_entry_set_size(entry, 0);
@@ -117,10 +120,13 @@ bool writeEntry(struct archive* disk, struct archive* writer,
       archive_entry_set_size(entry, 0);
     }
   }
-  return acceptWarning(writer, archive_write_header(writer, entry), force,
-                       message) &&
-         (archive_entry_size(entry) == 0 ||
-          copyData(disk, writer, message) == 0);
+  if (!acceptWarning(writer, archive_write_header(writer, entry), force,
+                     message) ||
+      (archive_entry_size(entry) != 0 &&
+       copyData(disk, writer, progress, message) != 0))
+    return false;
+  progress.update(writer);
+  return true;
 }
 
 bool validRelativePath(const std::string& path) {
@@ -157,7 +163,7 @@ bool configureWriterFilter(struct archive* writer, const std::string& filter,
 bool writeSubstitution(
     struct archive* writer,
     const archiveio::Substitution& substitution, FileLinks& links,
-    bool force, std::string& message) {
+    ArchiveProgress& progress, bool force, std::string& message) {
   if (!validRelativePath(substitution.source) ||
       !validRelativePath(substitution.destination)) {
     message = "invalid archive substitution path";
@@ -180,7 +186,7 @@ bool writeSubstitution(
   if (!acceptWarning(disk.get(), status, force, message) ||
       status == ARCHIVE_EOF ||
       !writeEntry(disk.get(), writer, entry.get(), substitution.destination,
-                  links, force, message)) {
+                  links, progress, force, message)) {
     if (status == ARCHIVE_EOF && message.empty())
       message = "archive substitution source is missing";
     archive_read_close(disk.get());
@@ -190,9 +196,20 @@ bool writeSubstitution(
   return true;
 }
 
+struct ExtractionProgress {
+  ArchiveProgress& output;
+  struct archive* reader;
+};
+
+void extractionProgress(void* data) {
+  auto* progress = static_cast<ExtractionProgress*>(data);
+  progress->output.update(progress->reader);
+}
+
 }  // namespace
 
-int unpackArchive(int descriptor, bool force, std::string& message) {
+int unpackArchive(int descriptor, bool force, std::string& message,
+                  int progressDescriptor, ProgressStyle progressStyle) {
   UniqueFd input = reopenArchiveDescriptor(descriptor, O_RDONLY, message);
   if (!input) return 1;
   ArchiveReader reader(archive_read_new(), archive_read_free);
@@ -204,6 +221,12 @@ int unpackArchive(int descriptor, bool force, std::string& message) {
   archive_read_support_format_all(reader.get());
   if (archive_read_open_fd(reader.get(), input.get(), 10240) != ARCHIVE_OK)
     return archiveFailure(reader.get(), message);
+
+  ArchiveProgress progress(progressDescriptor, "Extracting rootfs",
+                           progressStyle, archiveDescriptorSize(input.get()));
+  ExtractionProgress extraction{progress, reader.get()};
+  archive_read_extract_set_progress_callback(reader.get(),
+                                             extractionProgress, &extraction);
 
   constexpr int options =
       ARCHIVE_EXTRACT_OWNER | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_TIME |
@@ -223,7 +246,10 @@ int unpackArchive(int descriptor, bool force, std::string& message) {
       archive_read_close(reader.get());
       return 1;
     }
+    progress.update(reader.get());
   }
+  progress.update(reader.get());
+  progress.complete();
   archive_read_close(reader.get());
   return 0;
 }
@@ -232,7 +258,8 @@ int packArchive(int descriptor, const std::string& filter,
                 const std::vector<std::string>& excludes,
                 const std::vector<archiveio::Substitution>& substitutions,
                 bool force,
-                std::string& message) {
+                std::string& message, int progressDescriptor,
+                ProgressStyle progressStyle) {
   UniqueFd output =
       reopenArchiveDescriptor(descriptor, O_WRONLY | O_TRUNC, message);
   if (!output) return 1;
@@ -252,6 +279,8 @@ int packArchive(int descriptor, const std::string& filter,
     return archiveFailure(disk.get(), message);
   }
 
+  ArchiveProgress progress(progressDescriptor, "Packing rootfs",
+                           progressStyle);
   FileLinks links;
   ArchiveEntry entry(archive_entry_new(), archive_entry_free);
   int status;
@@ -271,7 +300,7 @@ int packArchive(int descriptor, const std::string& filter,
     if (archive_read_disk_can_descend(disk.get()))
       archive_read_disk_descend(disk.get());
     if (!writeEntry(disk.get(), writer.get(), entry.get(),
-                    name ? name : "", links, force, message)) {
+                    name ? name : "", links, progress, force, message)) {
       if (message.empty()) archiveFailure(writer.get(), message);
       archive_read_close(disk.get());
       archive_write_close(writer.get());
@@ -280,7 +309,8 @@ int packArchive(int descriptor, const std::string& filter,
     archive_entry_clear(entry.get());
   }
   for (const auto& substitution : substitutions) {
-    if (!writeSubstitution(writer.get(), substitution, links, force, message)) {
+    if (!writeSubstitution(writer.get(), substitution, links, progress, force,
+                           message)) {
       archive_read_close(disk.get());
       archive_write_close(writer.get());
       return 1;
@@ -292,6 +322,8 @@ int packArchive(int descriptor, const std::string& filter,
     archive_read_close(disk.get());
     return result;
   }
+  progress.update(writer.get());
+  progress.complete();
   archive_read_close(disk.get());
   return 0;
 }

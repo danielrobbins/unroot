@@ -330,6 +330,12 @@ when active. Compression is selected from the destination suffix (`.gz`, `.xz`,
 `.zst`). Registered injections are replaced by their preserved rootfs originals
 during capture.
 
+On an interactive terminal, archive operations show live progress and average
+throughput in MiB/s. Inspection and extraction report a percentage against the
+known archive size. Packing reports activity and processed data without adding
+a second filesystem walk solely to estimate a total. Progress is automatically
+suppressed when standard error is redirected.
+
 Archives contain the ownership visible inside the managed root, not its shifted
 host representation. This makes `pack` and `unpack` the safe way to copy a rootfs
 between ownership models. For example, turn a rich root into a separate native,

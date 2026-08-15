@@ -3,6 +3,7 @@
 #include <string>
 
 #include "archive_report.hpp"
+#include "util/progress_style.hpp"
 
 namespace util {
 
@@ -13,7 +14,9 @@ struct ArchiveScanResult {
   explicit operator bool() const { return error.empty(); }
 };
 
-ArchiveScanResult inspectArchive(int descriptor);
+ArchiveScanResult inspectArchive(
+    int descriptor, int progressDescriptor = -1,
+    ProgressStyle progressStyle = ProgressStyle::Ascii);
 std::string archiveLibraryVersion();
 
 }  // namespace util

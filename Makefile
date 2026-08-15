@@ -99,8 +99,8 @@ else
 UTIL_HAVE_LIBSUBID := $(UNROOT_UTIL_LIBSUBID)
 endif
 
-UTIL_FEATURE_FLAGS :=
-UTIL_LIBS := -larchive
+UTIL_FEATURE_FLAGS := -pthread
+UTIL_LIBS := -larchive -pthread
 ifeq ($(UTIL_HAVE_LIBSUBID),1)
 UTIL_FEATURE_FLAGS += -DUNROOT_HAVE_LIBSUBID=1
 UTIL_LIBS += -lsubid
@@ -116,6 +116,7 @@ UTIL_SOURCES := \
 	$(SRC_DIR)/util/archive_fd.cpp \
 	$(SRC_DIR)/util/archive_engine.cpp \
 	$(SRC_DIR)/util/archive_inspector.cpp \
+	$(SRC_DIR)/util/archive_progress.cpp \
 	$(SRC_DIR)/util/filesystem_probe.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
 	$(SRC_DIR)/util/subid_backend.cpp

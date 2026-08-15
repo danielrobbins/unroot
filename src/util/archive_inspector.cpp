@@ -12,6 +12,7 @@
 #include <archive_entry.h>
 
 #include "archive_fd.hpp"
+#include "archive_progress.hpp"
 
 namespace util {
 
@@ -123,7 +124,9 @@ void inspectType(struct archive_entry* entry, const std::string& path,
 }
 
 }  // namespace
-ArchiveScanResult inspectArchive(int descriptor) {
+
+ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
+                                 ProgressStyle progressStyle) {
   std::string error;
   UniqueFd input = reopenArchiveDescriptor(descriptor, O_RDONLY, error);
   if (!input) return {{}, std::move(error)};
@@ -141,6 +144,8 @@ ArchiveScanResult inspectArchive(int descriptor) {
     return {{}, std::move(error)};
   }
 
+  ArchiveProgress progress(progressDescriptor, "Inspecting archive",
+                           progressStyle, archiveDescriptorSize(input.get()));
   archiveinfo::ArchiveReport report;
   struct archive_entry* entry = nullptr;
   int status = ARCHIVE_OK;
@@ -172,6 +177,7 @@ ArchiveScanResult inspectArchive(int descriptor) {
     inspectMetadata(entry, path.value, report);
     inspectType(entry, path.value, report);
     if (archive_read_data_skip(reader.get()) < ARCHIVE_WARN) break;
+    progress.update(reader.get());
   }
 
   if (const char* name = archive_format_name(reader.get())) report.format = name;
@@ -186,6 +192,8 @@ ArchiveScanResult inspectArchive(int descriptor) {
     archive_read_close(reader.get());
     return {{}, std::move(error)};
   }
+  progress.update(reader.get());
+  progress.complete();
   archive_read_close(reader.get());
   return {std::move(report), {}};
 }
