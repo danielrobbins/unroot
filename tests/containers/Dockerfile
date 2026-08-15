@@ -23,4 +23,4 @@ USER unroot
 ENV HOME=/home/unroot
 
 COPY --chown=unroot:unroot . .
-RUN make clean cli test UNROOT_UTIL_LIBARCHIVE=1 UNROOT_UTIL_LIBSUBID=1
+RUN make clean cli test UNROOT_UTIL_LIBSUBID=1

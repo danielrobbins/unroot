@@ -394,7 +394,7 @@ Native ownership requires host root privileges and Linux mount and PID namespace
 
 Private foreign execution additionally requires Linux 6.7 or newer and a compatible static `qemu-*-static` user emulator. Native foreign execution requires host `binfmt_misc` and a trusted static QEMU when no compatible handler is already registered.
 
-Archive inspection, `pack`, and `unpack` require a libarchive-enabled `unroot-util` installed beside `unroot`. Distribution packages provide the matching host library dependency. Source builds report archive support as unavailable when libarchive development files were absent while building the helper.
+Archive inspection, `pack`, and `unpack` require `unroot-util` installed beside `unroot`. Libarchive is a mandatory build and runtime dependency of the helper, and every build verifies that the linked library can read and write POSIX ACLs and extended attributes. The build fails if libarchive is unavailable or if the linked library or build probe filesystem cannot preserve either metadata type. Set `UNROOT_LIBARCHIVE_PROBE_DIR` when `/tmp` is not a suitable probe filesystem.
 
 Adding, removing, or clearing injections also requires the sibling `unroot-util`; it performs mapped file installation and restoration under the ownership policy selected by the static engine. Listing the registry does not modify the rootfs.
 

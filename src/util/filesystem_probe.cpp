@@ -9,15 +9,12 @@
 
 #include <utility>
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 #include <archive.h>
 #include <archive_entry.h>
 #include <memory>
-#endif
 
 namespace util {
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 namespace {
 
 using ArchiveReader =
@@ -199,13 +196,5 @@ fsinfo::Result inspectFilesystem(int descriptor) {
                     std::string(std::strerror(errno))};
   return result;
 }
-
-#else
-
-fsinfo::Result inspectFilesystem(int) {
-  return {{}, "filesystem inspection requires libarchive support"};
-}
-
-#endif
 
 }  // namespace util

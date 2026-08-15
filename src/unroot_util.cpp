@@ -61,12 +61,8 @@ int archiveCommand(int argc, char** argv) {
     if (!std::setlocale(LC_CTYPE, "C.UTF-8"))
         std::setlocale(LC_CTYPE, "C.utf8");
     if (argc == 3 && std::string(argv[2]) == "--version") {
-        const std::string version = util::archiveLibraryVersion();
-        if (version.empty()) {
-            std::cerr << "archive inspection requires libarchive support\n";
-            return 1;
-        }
-        std::cout << archiveinfo::Protocol << ' ' << version << '\n';
+        std::cout << archiveinfo::Protocol << ' '
+                  << util::archiveLibraryVersion() << '\n';
         return 0;
     }
     unsigned int descriptor = 0;

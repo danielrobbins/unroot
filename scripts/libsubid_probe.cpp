@@ -1,5 +1,3 @@
-#if defined(UNROOT_PROBE_LIBSUBID)
-
 #include <cstdlib>
 #if __has_include(<shadow/subid.h>)
 #include <shadow/subid.h>
@@ -16,16 +14,3 @@ int main() {
   std::free(ranges);
   return count < 0;
 }
-
-#elif defined(UNROOT_PROBE_LIBARCHIVE)
-
-#include <archive.h>
-
-int main() {
-  struct archive* archive = archive_read_new();
-  return archive_read_free(archive);
-}
-
-#else
-#error "optional library probe not selected"
-#endif

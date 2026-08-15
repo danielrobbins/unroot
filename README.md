@@ -494,8 +494,10 @@ same binary directory.
   `binfmt_misc` handlers already registered)
 - Host `binfmt_misc` and a trusted static QEMU emulator for native foreign
   execution when no compatible handler is already present
-- A libarchive-enabled `unroot-util` beside `unroot` for archive inspection,
-  `pack`, `unpack`, and injection management
+- `unroot-util` beside `unroot`, with libarchive available at build and runtime,
+  for archive inspection, `pack`, `unpack`, and injection management; every
+  build verifies that the linked libarchive can read and write POSIX ACLs and
+  extended attributes
 - A C++17 compiler and GNU Make when building from source
 
 `make cli` produces a statically linked `bin/unroot` namespace engine and a

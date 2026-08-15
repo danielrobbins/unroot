@@ -8,16 +8,13 @@
 #include <string>
 #include <vector>
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 #include <archive.h>
 #include <archive_entry.h>
 
 #include "archive_fd.hpp"
-#endif
 
 namespace util {
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 namespace {
 
 using Reader = std::unique_ptr<struct archive, decltype(&archive_read_free)>;
@@ -126,13 +123,7 @@ void inspectType(struct archive_entry* entry, const std::string& path,
 }
 
 }  // namespace
-#endif
-
 ArchiveScanResult inspectArchive(int descriptor) {
-#ifndef UNROOT_HAVE_LIBARCHIVE
-  (void)descriptor;
-  return {{}, "archive inspection requires libarchive support"};
-#else
   std::string error;
   UniqueFd input = reopenArchiveDescriptor(descriptor, O_RDONLY, error);
   if (!input) return {{}, std::move(error)};
@@ -197,16 +188,11 @@ ArchiveScanResult inspectArchive(int descriptor) {
   }
   archive_read_close(reader.get());
   return {std::move(report), {}};
-#endif
 }
 
 std::string archiveLibraryVersion() {
-#ifdef UNROOT_HAVE_LIBARCHIVE
   const char* version = archive_version_string();
   return version ? version : "libarchive";
-#else
-  return {};
-#endif
 }
 
 }  // namespace util

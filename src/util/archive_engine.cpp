@@ -2,7 +2,6 @@
 
 #include <string>
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 #include <algorithm>
 #include <array>
 #include <archive.h>
@@ -12,11 +11,9 @@
 #include <memory>
 
 #include "archive_fd.hpp"
-#endif
 
 namespace util {
 
-#ifdef UNROOT_HAVE_LIBARCHIVE
 namespace {
 
 using ArchiveReader =
@@ -298,21 +295,5 @@ int packArchive(int descriptor, const std::string& filter,
   archive_read_close(disk.get());
   return 0;
 }
-
-#else
-
-int unpackArchive(int, bool, std::string& message) {
-  message = "archive extraction requires libarchive support";
-  return 1;
-}
-
-int packArchive(int, const std::string&, const std::vector<std::string>&,
-                const std::vector<archiveio::Substitution>&, bool,
-                std::string& message) {
-  message = "archive creation requires libarchive support";
-  return 1;
-}
-
-#endif
 
 }  // namespace util

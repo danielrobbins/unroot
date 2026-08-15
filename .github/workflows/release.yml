@@ -81,8 +81,6 @@ jobs:
           printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subuid >/dev/null
           printf '%s:1000000:200000\n' "$USER" | sudo tee -a /etc/subgid >/dev/null
       - name: Build and verify static engine
-        env:
-          UNROOT_UTIL_LIBARCHIVE: "1"
         run: >-
           python3 scripts/release.py build
           --architecture "${{ matrix.architecture }}"
