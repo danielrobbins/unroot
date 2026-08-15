@@ -261,6 +261,37 @@ def test_enter_single_has_readonly_sysfs_and_inherited_term(
     assert result.stdout == "xterm-256color"
 
 
+def test_enter_single_parent_paths_see_mounted_top_level_filesystems(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    busybox = find_static_busybox()
+    require_capability(
+        busybox is not None,
+        "a static BusyBox is required for rooted single-ID entry coverage",
+        "single_rootfs",
+    )
+    root = create_rootfs(tmp_path / "single-parent-mounts", busybox)
+
+    result = unroot.run(
+        "enter",
+        "--single",
+        str(root),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        "test -r /etc/../proc/self/status; "
+        "test -c /etc/../dev/null; "
+        "test -d /etc/../run; "
+        "test -d /etc/../sys/devices/system/cpu; "
+        "printf parent-mounts-ok",
+    ).assert_ok()
+
+    assert result.stdout == "parent-mounts-ok"
+
+
 def test_enter_single_does_not_inject_host_network_files(
     unroot: UnrootRunner,
     tmp_path: Path,
@@ -491,6 +522,31 @@ def test_managed_rootfs_has_default_injections(
     mtab = next(item for item in listed["entries"] if item["name"] == "mtab")
     assert mtab["mode"] == "0777"
     assert mtab["current"] == "symlink"
+
+
+def test_managed_rootfs_relative_mtab_symlink_remains_usable(
+    unroot: UnrootRunner, managed_rootfs: Path
+) -> None:
+    unroot.run("inject", "remove", str(managed_rootfs), "mtab").assert_ok()
+    mtab = managed_rootfs / "etc" / "mtab"
+    if mtab.exists() or mtab.is_symlink():
+        mtab.unlink()
+    mtab.symlink_to("../proc/self/mounts")
+    assert mtab.readlink() == Path("../proc/self/mounts")
+
+    result = unroot.run(
+        "enter",
+        str(managed_rootfs),
+        "--",
+        "/bin/busybox",
+        "sh",
+        "-c",
+        "/bin/busybox head -n 1 /etc/mtab >/dev/null; "
+        "/bin/busybox grep -q ' /proc ' /etc/mtab; "
+        "printf relative-mtab-ok",
+    ).assert_ok()
+
+    assert result.stdout == "relative-mtab-ok"
 
 
 def test_inject_clear_restores_defaults_and_add_reenables_one(
