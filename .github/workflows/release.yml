@@ -179,6 +179,8 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends ca-certificates git tar
           else
+            # DNF can skip recommendations that require upgrading base-image libraries.
+            dnf upgrade --refresh -y
             dnf install -y ca-certificates git gzip tar
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
