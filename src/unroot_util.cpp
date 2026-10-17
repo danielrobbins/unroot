@@ -139,11 +139,17 @@ int archiveCommand(int argc, char** argv) {
         std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
         descriptor <= INT_MAX && std::string(argv[5]) == "--filter") {
         bool packForce = false;
+        bool rootOnly = false;
         ProgressArguments progress;
         std::vector<std::string> excludes;
+        std::vector<std::string> patterns;
         std::vector<archiveio::Substitution> substitutions;
         for (int index = 7; index < argc;) {
             const std::string option = argv[index++];
+            if (option == "--root-only" && !rootOnly) {
+                rootOnly = true;
+                continue;
+            }
             if (option == "--force") {
                 if (packForce) {
                     usage();
@@ -164,6 +170,8 @@ int archiveCommand(int argc, char** argv) {
                 }
             } else if (option == "--exclude") {
                 excludes.push_back(value);
+            } else if (option == "--exclude-glob") {
+                patterns.push_back(value);
             } else if (option == "--substitute") {
                 const auto separator = value.find('=');
                 if (separator == std::string::npos || separator == 0 ||
@@ -184,8 +192,8 @@ int archiveCommand(int argc, char** argv) {
         }
         std::string error;
         const int result = util::packArchive(static_cast<int>(descriptor),
-                                             argv[6], excludes, substitutions,
-                                             packForce, error,
+                                             argv[6], excludes, patterns, substitutions,
+                                             packForce, rootOnly, error,
                                              progress.descriptor,
                                              progress.selectedStyle());
         if (!error.empty())

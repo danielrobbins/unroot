@@ -62,6 +62,18 @@ When you're done, capture the modified system:
 $ unroot pack ~/roots/raspi4 raspi4-modified.tar.zst
 ```
 
+### Keep machine-specific files out of archives
+
+Newly unpacked roots have an exclusion for `/etc/ssh/ssh_host_*`, preventing their SSH server identity from being distributed in subsequent archives. Exclusions never delete files from the working root. Inspect or change them separately from injections:
+
+```console
+$ unroot exclude list ~/rootfs
+$ unroot exclude add ~/rootfs /build '/tmp/*'
+$ unroot exclude remove ~/rootfs '/etc/ssh/ssh_host_*'
+```
+
+The last command deliberately permits the existing server identity in future archives. For a single-owner root built without subordinate IDs, use `unroot pack --single ROOT ARCHIVE`; its files are recorded as root-owned. See the manual's **Archive Exclusions** section for pattern matching and defaults.
+
 ### Use a 32-core x86-64 system as an ARM64 build machine
 
 Say `/mnt/raspi4-root` is an NFS mount of a real Raspberry Pi root filesystem.

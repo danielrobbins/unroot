@@ -16,6 +16,7 @@
 #include "archive_inspector.hpp"
 #include "filesystem_inspector.hpp"
 #include "meta.hpp"
+#include "exclusions.hpp"
 #include "injections.hpp"
 #include "util/archive_lock.hpp"
 #include "util/error_map.hpp"
@@ -168,14 +169,20 @@ int ArchiveAction::perform(const PackConfig& config) {
 
   auto stored = meta::readIdMap(pinnedRoot);
   if (!stored.error.empty()) fail("idmap: " + stored.error);
-  if (!stored.found)
+  if (config.single && stored.found)
+    fail("--single cannot override recorded rootfs ownership mappings");
+  if (!config.single && !stored.found)
     fail(
-        "rootfs has no ID-map metadata; initialize it with enter or unpack "
-        "first");
-  auto idmap = resolvedMap(pinnedRoot, stored.plan.mode,
-                           util::subordinateIdCount(stored.plan), false);
+        "rootfs has no ID-map metadata; use --single for a caller-owned "
+        "rootfs, or unpack an archive to initialize a managed rootfs");
+  auto idmap = config.single
+                   ? util::makeSingleIdMap(::getuid(), ::getgid())
+                   : resolvedMap(pinnedRoot, stored.plan.mode,
+                                 util::subordinateIdCount(stored.plan), false);
   auto injectionPlan = injections::archivePlan(pinnedRoot);
   if (!injectionPlan) fail(injectionPlan.error);
+  if (!exclusions::list(pinnedRoot, injectionPlan.patterns, injectionPlan.error))
+    fail(injectionPlan.error);
 
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   const int result = backend.create(pinnedRoot, idmap, output.descriptor(),
@@ -227,6 +234,8 @@ int ArchiveAction::perform(const UnpackConfig& config) {
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (result == 0) {
     std::string error;
+    if (!exclusions::update(pinnedRoot.string(), "add", {exclusions::HostKeys}, error))
+      fail("exclusions: " + error);
     if (!injections::add(
             pinnedRoot.string(), initialized.plan,
             injections::defaults(config.disabledInjections), error))
