@@ -21,6 +21,7 @@ public:
     mutable bool native = false;
     mutable emulation::Policy emulationPolicy = emulation::Policy::Auto;
     mutable bool emulationSpecified = false;
+    mutable std::string emulationFor;
     mutable std::string qemu;
     mutable std::string qemuCpu;
 

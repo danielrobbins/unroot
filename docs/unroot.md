@@ -314,6 +314,12 @@ Disable one or more default injections during `unpack`. Accepts `-hosts`, `-reso
 
 Set the foreign-execution policy. `auto`, the default, uses a static QEMU user-mode emulator when the target ELF architecture differs from the host. `never` rejects a foreign target instead.
 
+### --emulation-for PATH
+
+Also prepare emulation for the architecture of a program at an absolute path inside *ROOT*. This is useful when a host-executable build tool starts foreign-architecture child programs: for example, `--emulation-for /bin/sh` allows an x86-64 Bash to launch ARM64 programs in an ARM64 root. The reference program is inspected, including its script interpreter, but is not executed or substituted for the requested command. It must resolve to a supported ELF image. This does not copy host libraries, replace target programs, or change ownership policy.
+
+Unroot still checks the initial command. A host-architecture reference cannot disable emulation needed by that command. Requests requiring two different foreign architectures are rejected; one foreign architecture is supported per entry. `--emulation never` still rejects any required foreign execution. Without this option, only the initial command determines automatic emulation setup.
+
 ### --qemu PATH
 
 Use the specified static QEMU user-mode emulator for foreign execution. Rich mode may use an executable path or a name on the host `PATH`. Native mode requires a trusted root-owned system path. The emulator itself must be executable by the host architecture.
