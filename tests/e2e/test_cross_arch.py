@@ -81,6 +81,52 @@ def _default_foreign_qemu() -> Optional[str]:
     return shutil.which(name) if name else None
 
 
+@pytest.fixture
+def argument_rootfs(tmp_path, require_capability):
+    compiler = os.environ.get("CROSS_CC", "")
+    require_capability(
+        bool(compiler) and shutil.which(compiler) is not None,
+        "argument-preservation checks require CROSS_CC",
+        "cross_arch",
+    )
+    root = create_rootfs(tmp_path / "arguments")
+    source = Path(__file__).parent / "fixtures" / "argv_probe.c"
+    for cc, name in ((os.environ.get("CC", "cc"), "launcher"), (compiler, "probe")):
+        run_command([
+            cc, "-static", "-O2", "-o", str(root / "bin" / name), str(source),
+        ]).assert_ok()
+    return root
+
+
+@pytest.mark.parametrize("name", ["probe", "-login", "custom name", ""])
+def test_foreign_program_preserves_callers_arguments(unroot, argument_rootfs, name):
+    result = unroot.run(
+        "enter", "--single", str(argument_rootfs), "--emulation-for", "/bin/probe",
+        "--", "/bin/launcher", "--exec", "/bin/probe", name,
+        "first", "", "two words", "--last", timeout=90,
+    )
+    result.assert_ok()
+    assert result.stdout.splitlines() == [
+        f"arg0=<{name}>", "arg1=<first>", "arg2=<>",
+        "arg3=<two words>", "arg4=<--last>",
+    ]
+
+
+def test_foreign_shebang_preserves_interpreter_and_script_arguments(unroot, argument_rootfs):
+    script = argument_rootfs / "bin" / "script"
+    script.write_text("#!/bin/probe interpreter-option\n", encoding="utf-8")
+    script.chmod(0o755)
+    result = unroot.run(
+        "enter", "--single", str(argument_rootfs), "--",
+        "/bin/script", "first", "", "two words", timeout=90,
+    )
+    result.assert_ok()
+    assert result.stdout.splitlines() == [
+        "arg0=</bin/probe>", "arg1=<interpreter-option>", "arg2=</bin/script>",
+        "arg3=<first>", "arg4=<>", "arg5=<two words>",
+    ]
+
+
 def test_foreign_architecture_execution(
     unroot: UnrootRunner,
     empty_rootfs: Path,
