@@ -273,14 +273,6 @@ static bool bindRootfsSelf(const util::Rootfs& root) {
 static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
                         const EmuPlan* emu,
                         const std::vector<BindMap>* maps) {
-  // Optional emulator bind (for cross-arch without binfmt): host file -> /tmp/unroot/<name> in rootfs
-  if (emu && !emu->source.empty() && !emu->target.empty()) {
-    std::string note = std::string("static emulator: src=") + emu->source +
-                       " dst=" + emu->target;
-    if (!bindRootfsTarget(root, emu->source.c_str(), emu->target, false,
-                          false, true, "bind:emu", true, note.c_str()))
-      return false;
-  }
   // User-requested map binds (enforced): abort on failure
   if (maps) {
     for (const auto& m : *maps) {
@@ -301,6 +293,14 @@ static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
           true, nullptr);
       if (!mounted) return false;
     }
+  }
+  // Mount QEMU after maps so a prefixed root's /.unroot bind cannot hide it.
+  if (emu && !emu->source.empty() && !emu->target.empty()) {
+    std::string note = std::string("static emulator: src=") + emu->source +
+                       " dst=" + emu->target;
+    if (!bindRootfsTarget(root, emu->source.c_str(), emu->target, false,
+                          false, true, "bind:emu", true, note.c_str()))
+      return false;
   }
   // Only host binds pre-chroot
   if (opt.bindDev) {

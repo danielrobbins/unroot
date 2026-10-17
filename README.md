@@ -321,11 +321,17 @@ native-architecture builds are unaffected.
 
 ## Rootfs Archives
 
-Unroot currently supports raw root filesystem tar archives, with filesystem
-entries such as `bin/`, `etc/`, and `usr/` directly at the archive root. Gentoo
-and Funtoo stage tarballs are common examples. Wrapping directories,
-OCI/container-image layouts, disk images, and installer media are not currently
-supported; additional formats will likely be added in the future.
+Unroot supports raw root filesystem tar archives, with filesystem entries such as `bin/`, `etc/`, and `usr/` directly at the archive root. Gentoo and Funtoo stage tarballs are common examples. When a raw archive wraps its rootfs in a directory, use `--root-prefix PATH` to record that directory as the effective root while preserving the complete archive layout.
+
+OCI image-layout archives can be imported explicitly by flattening their ordered layers into a normal managed rootfs:
+
+```console
+$ unroot unpack --flatten --platform linux/arm64 image.tar ~/roots/image
+```
+
+Unroot verifies the selected manifest, config, layer descriptors, compressed digests, and uncompressed layer digests before extraction. It applies OCI whiteouts and opaque directories in layer order, records compact source provenance in `.unroot/meta.json`, and then treats the result like any other managed rootfs. OCI runtime settings are recorded for reference but do not silently change `unroot enter` behavior.
+
+Flattening is deliberately one-way: the original blobs and layer boundaries are not retained, and `unroot pack` creates an ordinary flat rootfs archive. An OCI image requires `--flatten`, while `--flatten` rejects a raw archive. Disk images and installer media remain outside this archive interface.
 
 `unroot unpack ARCHIVE ROOT` creates a managed rich rootfs and extracts the
 archive inside its subordinate-ID mapping. It opens and inspects the archive,
@@ -473,8 +479,7 @@ foreign-architecture commands, full-metadata tar import and export, minimal
 automatic mounts, environment and working-directory configuration, and exact
 child I/O and exit-status propagation.
 
-Broader experiments such as `fs.*` mutation commands, OCI packaging, overlays,
-and persistent sessions are deliberately outside the initial release. See
+Broader experiments such as `fs.*` mutation commands, retained OCI layers and OCI export, overlays, and persistent sessions are deliberately outside the initial release. See
 [Initial Public Release Scope](docs/initial-release-scope.md).
 
 ## Installation
@@ -546,6 +551,4 @@ now being honed into a focused Kernel Seeds tool with its own release boundary.
 
 ## License
 
-Unroot is licensed under the GNU General Public License, version 3 only
-(`GPL-3.0-only`). Vendored third-party components retain their original
-licenses and copyright notices.
+Unroot is licensed under the GNU General Public License, version 3 only (`GPL-3.0-only`). Vendored third-party components retain their original licenses and copyright notices, collected for installed binaries in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).

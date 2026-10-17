@@ -7,6 +7,7 @@
 #include "app_exception.hpp"
 #include "archive_action.hpp"
 #include "injections.hpp"
+#include "meta.hpp"
 #include "parsed_args.hpp"
 #include "unified_action_registry.hpp"
 #include "util/error_map.hpp"
@@ -94,6 +95,17 @@ void UnpackConfig::configure_parser() {
               throw AppException(
                   util::make_error(util::LibErr::Invalid, 0, error), "usage");
           })
+      .add_option_meta(
+          {"--root-prefix"}, "<path>",
+          "Use a relative directory inside the archive as the rootfs",
+          [this](const std::string& value) { rootPrefix = value; })
+      .add_flag_meta(
+          {"--flatten"}, "Import an OCI image as a normal root filesystem",
+          [this]() { flatten = true; })
+      .add_option_meta(
+          {"--platform"}, "<linux/arch[/variant]>",
+          "Select one platform from a multi-platform OCI image",
+          [this](const std::string& value) { platform = value; })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
       .add_positional_meta(
           "ARCHIVE", "Source tar archive",
@@ -123,6 +135,22 @@ void UnpackConfig::validate() const {
         util::make_error(util::LibErr::Invalid, 0,
                          "--native requires host root privileges; run with sudo"),
         "usage");
+  if (!rootPrefix.empty() && !meta::validRootPrefix(rootPrefix))
+    throw AppException(
+        util::make_error(
+            util::LibErr::Invalid, 0,
+            "--root-prefix expects a normalized relative directory path"),
+        "usage");
+  if (flatten && !rootPrefix.empty())
+    throw AppException(
+        util::make_error(util::LibErr::Invalid, 0,
+                         "--flatten cannot be combined with --root-prefix"),
+        "usage");
+  if (!platform.empty() && !flatten)
+    throw AppException(
+        util::make_error(util::LibErr::Invalid, 0,
+                         "--platform requires --flatten"),
+        "usage");
 }
 
 int UnpackConfig::handle(const ToBeParsedArgs& args) {
@@ -146,7 +174,7 @@ const bool pack_registered = []() {
 const bool unpack_registered = []() {
   actions::ActionRegistry::register_action(
       "unpack", actions::UnpackConfig::handle,
-      "Create a mapped root filesystem from a tar archive",
+      "Create a mapped root filesystem from a rootfs archive",
       "Initializes durable ownership metadata and restores full filesystem "
       "metadata; rich subordinate-ID ownership is the default.",
       "ARCHIVE ROOT [OPTIONS]",

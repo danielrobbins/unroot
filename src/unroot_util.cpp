@@ -3,6 +3,7 @@
 #include "util/idmap.hpp"
 #include "util/archive_inspector.hpp"
 #include "util/archive_engine.hpp"
+#include "util/oci_engine.hpp"
 #include "util/filesystem_probe.hpp"
 #include "util/rootfs.hpp"
 #include "archive_report.hpp"
@@ -28,6 +29,9 @@ void usage() {
                  "       unroot-util idmap --validate UID_START GID_START COUNT\n"
                  "       unroot-util archive inspect --fd FD [--progress-fd FD --progress-style STYLE]\n"
                  "       unroot-util archive unpack --fd FD [--force] [--progress-fd FD --progress-style STYLE]\n"
+                 "       unroot-util archive apply-layer --fd FD [--force] [--progress-fd FD --progress-style STYLE]\n"
+                 "       unroot-util archive stage-oci --fd FD\n"
+                 "       unroot-util archive decompress --fd FD --output-fd FD --filter FILTER\n"
                  "       unroot-util archive pack --fd FD --filter FILTER [--progress-fd FD --progress-style STYLE]\n"
                  "       unroot-util filesystem inspect --fd FD\n"
                  "       unroot-util injection install ...\n"
@@ -95,16 +99,60 @@ int archiveCommand(int argc, char** argv) {
     }
     unsigned int descriptor = 0;
     const std::string operation = argc >= 3 ? argv[2] : "";
-    if ((operation == "inspect" || operation == "unpack") &&
+    if (operation == "stage-oci" && argc == 5 &&
+        std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
+        descriptor <= INT_MAX) {
+        std::string error;
+        const int result =
+            util::stageOciLayout(static_cast<int>(descriptor), error);
+        if (!error.empty()) std::cerr << error << '\n';
+        return result;
+    }
+    if (operation == "decompress" && argc == 9 &&
+        std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
+        descriptor <= INT_MAX && std::string(argv[5]) == "--output-fd" &&
+        std::string(argv[7]) == "--filter") {
+        unsigned int output = 0;
+        if (!parseId(argv[6], output) || output > INT_MAX) {
+            usage();
+            return 2;
+        }
+        const std::string filter = argv[8];
+        if (filter != "none" && filter != "gzip" && filter != "zstd") {
+            usage();
+            return 2;
+        }
+        std::string error;
+        const int result = util::decompressOciLayer(
+            static_cast<int>(descriptor), static_cast<int>(output), filter,
+            error);
+        if (!error.empty()) std::cerr << error << '\n';
+        return result;
+    }
+    if ((operation == "inspect" || operation == "unpack" ||
+         operation == "apply-layer") &&
         argc >= 5 &&
         std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
         descriptor <= INT_MAX) {
         bool force = false;
+        std::string rootPrefix;
+        bool ociLayer = false;
         ProgressArguments progress;
         for (int index = 5; index < argc;) {
             const std::string option = argv[index++];
-            if (operation == "unpack" && option == "--force" && !force) {
+            if ((operation == "unpack" || operation == "apply-layer") &&
+                option == "--force" && !force) {
                 force = true;
+                continue;
+            }
+            if (operation == "inspect" && option == "--root-prefix" &&
+                rootPrefix.empty() && index < argc) {
+                rootPrefix = argv[index++];
+                continue;
+            }
+            if (operation == "inspect" && option == "--oci-layer" &&
+                !ociLayer) {
+                ociLayer = true;
                 continue;
             }
             if (index >= argc || !progress.consume(option, argv[index++])) {
@@ -119,7 +167,8 @@ int archiveCommand(int argc, char** argv) {
         if (operation == "inspect") {
             auto result = util::inspectArchive(static_cast<int>(descriptor),
                                                progress.descriptor,
-                                               progress.selectedStyle());
+                                               progress.selectedStyle(),
+                                               rootPrefix, ociLayer);
             if (!result) {
                 std::cerr << result.error << '\n';
                 return 1;
@@ -128,9 +177,13 @@ int archiveCommand(int argc, char** argv) {
             return 0;
         }
         std::string error;
-        const int result = util::unpackArchive(
-            static_cast<int>(descriptor), force, error, progress.descriptor,
-            progress.selectedStyle());
+        const int result = operation == "apply-layer"
+            ? util::applyOciLayer(static_cast<int>(descriptor), force, error,
+                                  progress.descriptor,
+                                  progress.selectedStyle())
+            : util::unpackArchive(static_cast<int>(descriptor), force, error,
+                                  progress.descriptor,
+                                  progress.selectedStyle());
         if (!error.empty())
             std::cerr << (result == 0 ? "Warning: " : "") << error << '\n';
         return result;

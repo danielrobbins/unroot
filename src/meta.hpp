@@ -4,6 +4,7 @@
 #include <vector>
 #include <filesystem>
 #include "nlohmann/json.hpp"
+#include "util/fd.hpp"
 #include "util/idmap.hpp"
 
 namespace meta {
@@ -16,6 +17,23 @@ struct IdMapMetaResult {
     std::string error;
 
     explicit operator bool() const { return found && error.empty(); }
+};
+
+struct RootLayout {
+    fs::path managedRoot;
+    fs::path effectiveRoot;
+    std::string rootPrefix;
+    UniqueFd effectiveFd;
+
+    bool prefixed() const { return !rootPrefix.empty(); }
+    std::string inManagedRoot(const std::string& absolutePath) const;
+};
+
+struct RootLayoutResult {
+    RootLayout layout;
+    std::string error;
+
+    explicit operator bool() const { return error.empty(); }
 };
 
 // Read raw meta.json contents if present.
@@ -40,6 +58,13 @@ IdMapMetaResult initializeIdMap(const fs::path& rootfs,
 IdMapMetaResult selectIdMap(util::IdMapMode mode, unsigned int richCount);
 IdMapMetaResult resolveIdMap(const fs::path& rootfs, util::IdMapMode mode,
                              unsigned int richCount, bool specified);
+bool validRootPrefix(const std::string& prefix);
+RootLayoutResult resolveRootLayout(const fs::path& rootfs);
+bool setRootPrefix(const fs::path& rootfs, const std::string& prefix,
+                   std::string& error);
+bool setOciProvenance(const fs::path& rootfs,
+                      const nlohmann::json& provenance,
+                      std::string& error);
 
 // Update (or create) qemuWrapper section with emulator binary, args, and wrapper inode identity.
 // Returns true if meta was modified and saved.

@@ -118,6 +118,7 @@ UTIL_SOURCES := \
 	$(SRC_DIR)/util/archive_inspector.cpp \
 	$(SRC_DIR)/util/archive_progress.cpp \
 	$(SRC_DIR)/util/filesystem_probe.cpp \
+	$(SRC_DIR)/util/oci_engine.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
 	$(SRC_DIR)/util/subid_backend.cpp
 UTIL_BUILD_DIR := $(BUILD_DIR)/unroot-util/subid-$(UTIL_HAVE_LIBSUBID)
@@ -153,6 +154,8 @@ CPP_SOURCES := \
 	$(SRC_DIR)/meta.cpp \
 	$(SRC_DIR)/injections.cpp \
 	$(SRC_DIR)/exclusions.cpp \
+	$(SRC_DIR)/oci.cpp \
+	$(SRC_DIR)/oci_import.cpp \
 	$(SRC_DIR)/archive_report.cpp \
 	$(SRC_DIR)/archive_input.cpp \
 	$(SRC_DIR)/archive_inspector.cpp \
@@ -183,6 +186,7 @@ CPP_SOURCES := \
 	$(SRC_DIR)/util/path.cpp \
 	$(SRC_DIR)/util/idmap.cpp \
 	$(SRC_DIR)/util/rootfs.cpp \
+	$(SRC_DIR)/util/sha256.cpp \
 	$(SRC_DIR)/util/subid.cpp \
 	$(SRC_DIR)/util/exception_handler.cpp
 
@@ -220,7 +224,7 @@ $(VERSION_HDR): FORCE VERSION
 
 $(SRC_DIR)/app_core.o $(SRC_DIR)/emulation.o: $(VERSION_HDR)
 
-CPP_INCLUDES := -I$(INC_DIR) -I$(INC_DIR2)
+CPP_INCLUDES := -I$(INC_DIR) -I$(INC_DIR2) -Ithird_party/picosha2
 
 # Build objects per source to allow parallel builds
 
@@ -493,11 +497,12 @@ install: $(BIN_DIR)/unroot $(UTIL_BIN) docs
 	install -m 0755 "$(BIN_DIR)/unroot" "$(BINDIR)/unroot"; \
 	install -m 0755 "$(UTIL_BIN)" "$(BINDIR)/unroot-util"; \
 	install -m 0644 docs/unroot.1 "$(MANDIR)/unroot.1"; \
-	install -m 0644 docs/unroot.md "$(DOCDIR)/unroot.md"
+	install -m 0644 docs/unroot.md "$(DOCDIR)/unroot.md"; \
+	install -m 0644 THIRD_PARTY_LICENSES.md "$(DOCDIR)/THIRD_PARTY_LICENSES.md"
 
 uninstall:
 	@echo "Uninstalling from $(PREFIX) (DESTDIR=$(DESTDIR))"; \
-	rm -f "$(BINDIR)/unroot" "$(BINDIR)/unroot-util" "$(MANDIR)/unroot.1" "$(DOCDIR)/unroot.md" 2>/dev/null || true
+	rm -f "$(BINDIR)/unroot" "$(BINDIR)/unroot-util" "$(MANDIR)/unroot.1" "$(DOCDIR)/unroot.md" "$(DOCDIR)/THIRD_PARTY_LICENSES.md" 2>/dev/null || true
 
 ## Distribution tarball (source)
 .PHONY: dist dist-clean
@@ -603,6 +608,7 @@ DOCTEST_HARNESS_SRCS := \
 	src/compat_blacklist.cpp \
 	src/meta.cpp \
 	src/injections.cpp \
+	src/oci.cpp \
 	src/binfmt.cpp \
 	src/hostcaps.cpp \
 	src/actions/config_base.cpp \
@@ -618,6 +624,7 @@ DOCTEST_HARNESS_SRCS := \
 	src/util/path.cpp \
 	src/util/idmap.cpp \
 	src/util/rootfs.cpp \
+	src/util/sha256.cpp \
 	src/util/subid.cpp \
 	src/util/subid_backend.cpp \
 	src/arch.cpp \
@@ -630,7 +637,7 @@ DOCTEST_SRCS := $(DOCTEST_TEST_SRCS) $(DOCTEST_HARNESS_SRCS)
 DOCTEST_OBJECTS := $(addprefix $(BUILD_DIR)/doctest/,$(DOCTEST_SRCS:.cpp=.o))
 DOCTEST_DEPS := $(DOCTEST_OBJECTS:.o=.d)
 DOCTEST_FLAGS := $(filter-out -static,$(CXXFLAGS)) -DUNROOT_ENABLE_DOCTEST \
-	-I$(SRC_DIR) -I$(INC_DIR2) -Ithird_party/doctest
+	-I$(SRC_DIR) -I$(INC_DIR2) -Ithird_party/doctest -Ithird_party/picosha2
 
 -include $(DOCTEST_DEPS)
 
@@ -653,7 +660,7 @@ test: $(UTIL_BIN) doctest
 
 .PHONY: e2e
 e2e: $(TARGET_BIN) $(UTIL_BIN)
-	@$(PYTEST) -q tests/e2e/test_native_enter.py tests/e2e/test_archive.py tests/e2e/test_single_pack.py tests/e2e/test_exclusions.py tests/e2e/test_rich_idmap.py tests/e2e/test_rootfs_journey.py
+	@$(PYTEST) -q tests/e2e/test_native_enter.py tests/e2e/test_archive.py tests/e2e/test_single_pack.py tests/e2e/test_exclusions.py tests/e2e/test_oci_import.py tests/e2e/test_rich_idmap.py tests/e2e/test_rootfs_journey.py
 
 .PHONY: e2e-cross
 e2e-cross: $(TARGET_BIN) $(UTIL_BIN)

@@ -256,17 +256,18 @@ bool preserved(const util::Rootfs& root, const Entry& entry) {
                                      : S_ISLNK(info.st_mode);
 }
 
-bool restore(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool restore(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
              const Entry& entry, std::string& error) {
   return runMapped(
-             rootfs, idmap,
-             {"injection", "restore", "--destination", entry.destination,
+             layout.managedRoot.string(), idmap,
+             {"injection", "restore", "--destination",
+              layout.inManagedRoot(entry.destination),
               "--backup", backupPath(entry.destination), "--absent",
               absentPath(entry.destination), "--original", entry.original},
              error) == 0;
 }
 
-bool install(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool install(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
              const util::Rootfs& root, Spec& spec, const Entry* existing,
              Entry& result, std::string& error) {
   UniqueFd source;
@@ -283,13 +284,15 @@ bool install(const std::string& rootfs, const util::IdMapPlan& idmap,
   }
   const std::string original = existing ? existing->original : "capture";
   arguments.insert(arguments.end(),
-                   {"--destination", spec.destination, "--backup",
+                   {"--destination", layout.inManagedRoot(spec.destination),
+                    "--backup",
                     backupPath(spec.destination), "--absent",
                     absentPath(spec.destination), "--original", original,
                     "--uid", std::to_string(spec.uid), "--gid",
                     std::to_string(spec.gid), "--mode",
                     std::to_string(spec.mode)});
-  if (runMapped(rootfs, idmap, std::move(arguments), error) != 0)
+  if (runMapped(layout.managedRoot.string(), idmap, std::move(arguments),
+                error) != 0)
     return false;
 
   result.name = spec.name.empty() && existing ? existing->name : spec.name;
@@ -396,9 +399,9 @@ bool parseUnpackExclusions(const std::string& value,
   return true;
 }
 
-bool list(const std::string& rootfs, std::vector<Entry>& entries,
+bool list(const meta::RootLayout& layout, std::vector<Entry>& entries,
           std::string& error) {
-  util::Rootfs root(rootfs);
+  util::Rootfs root(layout.managedRoot.string());
   if (!root) {
     error = "unable to open the managed rootfs";
     return false;
@@ -406,17 +409,16 @@ bool list(const std::string& rootfs, std::vector<Entry>& entries,
   return readRegistry(root, entries, error);
 }
 
-bool add(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool add(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
          std::vector<Spec> specs, std::string& error) {
   if (!prepareSources(specs, idmap, error)) return false;
-  util::Rootfs root(rootfs);
+  util::Rootfs root(layout.managedRoot.string());
   if (!root || root.isHostRoot()) {
     error = "unable to open a distinct managed rootfs";
     return false;
   }
   std::vector<Entry> entries;
   if (!readRegistry(root, entries, error)) return false;
-  const std::string pinned = util::Rootfs::fdPath(root.fd());
   for (auto& spec : specs) {
     auto existing = findDestination(entries, spec.destination);
     if (existing != entries.end() && !preserved(root, *existing)) {
@@ -424,7 +426,7 @@ bool add(const std::string& rootfs, const util::IdMapPlan& idmap,
       return false;
     }
     Entry installed;
-    if (!install(pinned, idmap, root, spec,
+    if (!install(layout, idmap, root, spec,
                  existing == entries.end() ? nullptr : &*existing,
                  installed, error))
       return false;
@@ -435,9 +437,9 @@ bool add(const std::string& rootfs, const util::IdMapPlan& idmap,
   return true;
 }
 
-bool remove(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool remove(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
             const std::vector<std::string>& targets, std::string& error) {
-  util::Rootfs root(rootfs);
+  util::Rootfs root(layout.managedRoot.string());
   if (!root || root.isHostRoot()) {
     error = "unable to open a distinct managed rootfs";
     return false;
@@ -460,19 +462,18 @@ bool remove(const std::string& rootfs, const util::IdMapPlan& idmap,
       return false;
     }
   }
-  const std::string pinned = util::Rootfs::fdPath(root.fd());
   for (const auto& target : targets) {
     auto entry = findTarget(entries, target);
-    if (!restore(pinned, idmap, *entry, error)) return false;
+    if (!restore(layout, idmap, *entry, error)) return false;
     entries.erase(entry);
     if (!writeRegistry(root, entries, error)) return false;
   }
   return true;
 }
 
-bool clear(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool clear(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
            std::string& error) {
-  util::Rootfs root(rootfs);
+  util::Rootfs root(layout.managedRoot.string());
   if (!root || root.isHostRoot()) {
     error = "unable to open a distinct managed rootfs";
     return false;
@@ -485,34 +486,35 @@ bool clear(const std::string& rootfs, const util::IdMapPlan& idmap,
       return false;
     }
   }
-  const std::string pinned = util::Rootfs::fdPath(root.fd());
   while (!entries.empty()) {
-    if (!restore(pinned, idmap, entries.back(), error)) return false;
+    if (!restore(layout, idmap, entries.back(), error)) return false;
     entries.pop_back();
     if (!writeRegistry(root, entries, error)) return false;
   }
   return true;
 }
 
-ArchivePlan archivePlan(const std::string& rootfs) {
+ArchivePlan archivePlan(const meta::RootLayout& layout) {
   ArchivePlan plan;
-  util::Rootfs root(rootfs);
+  util::Rootfs root(layout.managedRoot.string());
   if (!root) {
     plan.error = "unable to open managed rootfs injections";
     return plan;
   }
   std::vector<Entry> entries;
   if (!readRegistry(root, entries, plan.error)) return plan;
+  if (layout.prefixed()) plan.excludes.push_back(layout.rootPrefix + "/.unroot");
   for (const auto& entry : entries) {
     if (!preserved(root, entry)) {
       plan.error = "preserved original is missing for " + entry.destination;
       return plan;
     }
-    plan.excludes.push_back(entry.destination.substr(1));
+    plan.excludes.push_back(
+        layout.inManagedRoot(entry.destination).substr(1));
     if (entry.original != "absent")
       plan.substitutions.push_back(
           {backupPath(entry.destination).substr(1),
-           entry.destination.substr(1)});
+           layout.inManagedRoot(entry.destination).substr(1)});
   }
   return plan;
 }

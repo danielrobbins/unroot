@@ -23,6 +23,13 @@ class InjectionTree {
   std::filesystem::path root;
 };
 
+meta::RootLayout flatLayout(const std::filesystem::path& root) {
+  meta::RootLayout layout;
+  layout.managedRoot = root;
+  layout.effectiveRoot = root;
+  return layout;
+}
+
 }  // namespace
 
 TEST_CASE("injection specs accept builtins and typed file mappings") {
@@ -93,7 +100,7 @@ TEST_CASE("archive planning substitutes registered portable originals") {
                 "hosts")
       << "portable\n";
 
-  auto plan = injections::archivePlan(tree.root.string());
+  auto plan = injections::archivePlan(flatLayout(tree.root));
   REQUIRE(plan);
   CHECK(plan.excludes == std::vector<std::string>{"etc/hosts"});
   REQUIRE(plan.substitutions.size() == 1);
@@ -109,7 +116,33 @@ TEST_CASE("injection registry binds built-in names to built-in destinations") {
          R"({"name":"hosts","destination":"/etc/not-hosts",)"
          R"("original":"absent","uid":0,"gid":0,"mode":420}]})";
 
-  auto plan = injections::archivePlan(tree.root.string());
+  auto plan = injections::archivePlan(flatLayout(tree.root));
   CHECK_FALSE(plan);
   CHECK(plan.error == "malformed injection registry");
+}
+
+TEST_CASE("prefixed archive planning keeps metadata outside the effective root") {
+  InjectionTree tree;
+  std::ofstream(tree.root / ".unroot" / "injections" / "registry.json")
+      << R"({"version":"unroot.injections/v1","entries":[)"
+         R"({"name":"hosts","destination":"/etc/hosts",)"
+         R"("original":"regular","uid":0,"gid":0,"mode":420}]})";
+  std::ofstream(tree.root / ".unroot" / "injections" / "original" / "etc" /
+                "hosts")
+      << "portable\n";
+  auto layout = flatLayout(tree.root);
+  layout.rootPrefix = "bundle/rootfs";
+  layout.effectiveRoot = tree.root / layout.rootPrefix;
+
+  auto plan = injections::archivePlan(layout);
+
+  REQUIRE(plan);
+  CHECK((plan.excludes == std::vector<std::string>{
+                              "bundle/rootfs/.unroot",
+                              "bundle/rootfs/etc/hosts"}));
+  REQUIRE(plan.substitutions.size() == 1);
+  CHECK(plan.substitutions.front().source ==
+        ".unroot/injections/original/etc/hosts");
+  CHECK(plan.substitutions.front().destination ==
+        "bundle/rootfs/etc/hosts");
 }

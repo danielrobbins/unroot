@@ -20,6 +20,10 @@ Files: third_party/doctest/*
 Copyright: 2016-2023 Viktor Kirilov and contributors
 License: MIT
 
+Files: third_party/picosha2/*
+Copyright: 2017 okdshin
+License: MIT
+
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal

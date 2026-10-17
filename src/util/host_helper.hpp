@@ -20,6 +20,7 @@ struct HostHelperResult {
 std::string siblingHostHelper();
 HostHelperResult runHostHelper(const std::vector<std::string>& arguments,
                                size_t outputLimit = 4096,
-                               const std::string& helperPath = {});
+                               const std::string& helperPath = {},
+                               const std::string& workingDirectory = {});
 
 }  // namespace util

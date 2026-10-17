@@ -11,6 +11,9 @@ TEST_CASE("archive inspection protocol round trips structured findings") {
   report.maxUid = 1000;
   report.maxGid = 2000;
   report.ociLayout = true;
+  report.rootPrefix = "bundle/rootfs";
+  report.rootPrefixPresent = true;
+  report.rootPrefixReservedMetadata = true;
   report.xattrs = {2, {"bin/tool"}};
 
   auto parsed = archiveinfo::parseRecord(archiveinfo::makeRecord(report));
@@ -23,6 +26,9 @@ TEST_CASE("archive inspection protocol round trips structured findings") {
   CHECK(parsed.report.maxUid == 1000);
   CHECK(parsed.report.maxGid == 2000);
   CHECK(parsed.report.ociLayout);
+  CHECK(parsed.report.rootPrefix == "bundle/rootfs");
+  CHECK(parsed.report.rootPrefixPresent);
+  CHECK(parsed.report.rootPrefixReservedMetadata);
   CHECK(parsed.report.xattrs.count == 2);
   CHECK(parsed.report.xattrs.examples == std::vector<std::string>{"bin/tool"});
 }

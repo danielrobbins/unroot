@@ -16,7 +16,9 @@ struct InspectionResult {
 
 class Inspector {
  public:
-  InspectionResult inspect(const Input& input) const;
+  InspectionResult inspect(const Input& input,
+                           const std::string& rootPrefix = {}) const;
+  InspectionResult inspectOciLayer(const Input& input) const;
 };
 
 }  // namespace archiveio

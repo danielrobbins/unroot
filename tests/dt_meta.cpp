@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -185,4 +186,63 @@ TEST_CASE("managed rootfs metadata rejects the retired single mode") {
 
     CHECK_FALSE(loaded);
     CHECK(loaded.error.find("unknown ID map mode") != std::string::npos);
+}
+
+TEST_CASE("rootfs metadata resolves a pinned prefixed layout") {
+    MetaTree tree;
+    auto plan = util::makeRichIdMap(1000, 1000, 100000, 100000, 16,
+                                    "files");
+    REQUIRE(meta::initializeIdMap(tree.root, plan));
+    std::filesystem::create_directories(tree.root / "bundle" / "rootfs");
+    std::ofstream(tree.root / "bundle" / "rootfs" / "payload") << "ok\n";
+
+    std::string error;
+    REQUIRE(meta::setRootPrefix(tree.root, "bundle/rootfs", error));
+    auto resolved = meta::resolveRootLayout(tree.root);
+
+    REQUIRE(resolved);
+    CHECK(resolved.layout.managedRoot == tree.root);
+    CHECK(resolved.layout.rootPrefix == "bundle/rootfs");
+    CHECK(resolved.layout.prefixed());
+    CHECK(resolved.layout.inManagedRoot("/etc/hosts") ==
+          "/bundle/rootfs/etc/hosts");
+    CHECK(std::filesystem::exists(resolved.layout.effectiveRoot / "payload"));
+    CHECK(meta::loadMetaJson(tree.root)["layout"]["root_prefix"] ==
+          "bundle/rootfs");
+}
+
+TEST_CASE("rootfs metadata rejects missing and symlinked root prefixes") {
+    MetaTree tree;
+    auto plan = util::makeRichIdMap(1000, 1000, 100000, 100000, 16,
+                                    "files");
+    REQUIRE(meta::initializeIdMap(tree.root, plan));
+
+    std::string error;
+    CHECK_FALSE(meta::setRootPrefix(tree.root, "missing", error));
+    std::filesystem::create_directory(tree.root / "real");
+    std::filesystem::create_directory_symlink("real", tree.root / "link");
+    error.clear();
+    CHECK_FALSE(meta::setRootPrefix(tree.root, "link", error));
+}
+
+TEST_CASE("rootfs metadata records OCI provenance and a durable identity") {
+    MetaTree tree;
+    REQUIRE(meta::initializeIdMap(tree.root, util::makeNativeIdMap()));
+    const nlohmann::json provenance{
+        {"mode", "flattened"}, {"manifest_digest", "sha256:1234"}};
+
+    std::string error;
+    REQUIRE(meta::setOciProvenance(tree.root, provenance, error));
+    const auto first = meta::loadMetaJson(tree.root);
+    REQUIRE(first.contains("root_id"));
+    REQUIRE(first["root_id"].is_string());
+    CHECK(std::regex_match(first["root_id"].get<std::string>(),
+                           std::regex("[0-9a-f]{32}")));
+    CHECK(first["oci"] == provenance);
+
+    const std::string identity = first["root_id"].get<std::string>();
+    REQUIRE(meta::setOciProvenance(
+        tree.root, {{"mode", "flattened"}, {"platform", "linux/amd64"}},
+        error));
+    CHECK(meta::loadMetaJson(tree.root)["root_id"] == identity);
 }

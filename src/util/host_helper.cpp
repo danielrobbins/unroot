@@ -21,7 +21,8 @@ std::string siblingHostHelper() {
 
 HostHelperResult runHostHelper(const std::vector<std::string>& arguments,
                                size_t outputLimit,
-                               const std::string& helperPath) {
+                               const std::string& helperPath,
+                               const std::string& workingDirectory) {
   const std::string helper =
       helperPath.empty() ? siblingHostHelper() : helperPath;
   if (helper.empty() || ::access(helper.c_str(), X_OK) != 0)
@@ -43,6 +44,8 @@ HostHelperResult runHostHelper(const std::vector<std::string>& arguments,
          ::dup2(descriptor, STDERR_FILENO) < 0))
       _exit(126);
     if (descriptor > STDERR_FILENO) ::close(descriptor);
+    if (!workingDirectory.empty() && ::chdir(workingDirectory.c_str()) != 0)
+      _exit(126);
 
     std::vector<std::string> command{"unroot-util"};
     command.insert(command.end(), arguments.begin(), arguments.end());

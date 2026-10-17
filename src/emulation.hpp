@@ -15,6 +15,7 @@ const char* policyName(Policy policy);
 struct Settings {
   bool native = false;
   std::string root;
+  std::string metadataRoot;
   std::string executable;
   std::string hostArch;
   std::string targetArch;

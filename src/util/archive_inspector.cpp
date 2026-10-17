@@ -35,7 +35,7 @@ struct NormalizedPath {
   bool unsafe = false;
 };
 
-NormalizedPath normalizePath(const char* raw) {
+NormalizedPath normalizePath(const char* raw, bool strict = false) {
   if (!raw) return {{}, {}, true};
   const std::string input(raw);
   NormalizedPath result;
@@ -48,6 +48,7 @@ NormalizedPath normalizePath(const char* raw) {
         input.substr(begin, end == std::string::npos ? end : end - begin);
     if (!component.empty() && component != ".") {
       if (component == "..") {
+        if (strict) result.unsafe = true;
         if (components.empty())
           result.unsafe = true;
         else
@@ -96,13 +97,36 @@ void inspectMetadata(struct archive_entry* entry, const std::string& path,
 }
 
 void inspectType(struct archive_entry* entry, const std::string& path,
-                  archiveinfo::ArchiveReport& report) {
+                 const std::string& rootPrefix,
+                 archiveinfo::ArchiveReport& report, bool ociLayer) {
   if (const char* target = archive_entry_hardlink(entry)) {
     addExample(report.hardLinks, path);
-    const auto normalized = normalizePath(target);
+    const auto normalized = normalizePath(target, ociLayer);
     if (normalized.unsafe)
       addExample(report.unsafePaths, path + " -> " + normalized.value);
     if (normalized.top == ".unroot") report.reservedMetadata = true;
+    if (!rootPrefix.empty() &&
+        (normalized.value == rootPrefix + "/.unroot" ||
+         normalized.value.rfind(rootPrefix + "/.unroot/", 0) == 0))
+      report.rootPrefixReservedMetadata = true;
+  }
+  if (ociLayer) {
+    const size_t separator = path.rfind('/');
+    const std::string name =
+        path.substr(separator == std::string::npos ? 0 : separator + 1);
+    if (name.rfind(".wh.", 0) == 0) {
+      const bool regular = archive_entry_filetype(entry) == AE_IFREG;
+      const bool device = archive_entry_filetype(entry) == AE_IFCHR &&
+                          archive_entry_devmajor(entry) == 0 &&
+                          archive_entry_devminor(entry) == 0;
+      const std::string target = name.substr(4);
+      if ((!regular && !device) ||
+          (name != ".wh..wh..opq" &&
+           (target.empty() || target == "." || target == "..")))
+        addExample(report.unsafePaths, path);
+      if (separator == std::string::npos && target == ".unroot")
+        report.reservedMetadata = true;
+    }
   }
   switch (archive_entry_filetype(entry)) {
     case AE_IFLNK:
@@ -126,7 +150,9 @@ void inspectType(struct archive_entry* entry, const std::string& path,
 }  // namespace
 
 ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
-                                 ProgressStyle progressStyle) {
+                                 ProgressStyle progressStyle,
+                                 const std::string& rootPrefix,
+                                 bool ociLayer) {
   std::string error;
   UniqueFd input = reopenArchiveDescriptor(descriptor, O_RDONLY, error);
   if (!input) return {{}, std::move(error)};
@@ -147,16 +173,26 @@ ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
   ArchiveProgress progress(progressDescriptor, "Inspecting archive",
                            progressStyle, archiveDescriptorSize(input.get()));
   archiveinfo::ArchiveReport report;
+  report.rootPrefix = rootPrefix;
   struct archive_entry* entry = nullptr;
   int status = ARCHIVE_OK;
   while ((status = archive_read_next_header(reader.get(), &entry)) ==
          ARCHIVE_OK) {
-    const auto path = normalizePath(archive_entry_pathname(entry));
+    const auto path = normalizePath(archive_entry_pathname(entry), ociLayer);
     ++report.members;
     if (path.unsafe) addExample(report.unsafePaths, path.value);
     if (path.top == ".unroot") report.reservedMetadata = true;
     if (path.top == "oci-layout" && path.value == "oci-layout")
       report.ociLayout = true;
+    if (!rootPrefix.empty() &&
+        (path.value.rfind(rootPrefix + "/", 0) == 0 ||
+         (path.value == rootPrefix &&
+          archive_entry_filetype(entry) == AE_IFDIR)))
+      report.rootPrefixPresent = true;
+    if (!rootPrefix.empty() &&
+        (path.value == rootPrefix + "/.unroot" ||
+         path.value.rfind(rootPrefix + "/.unroot/", 0) == 0))
+      report.rootPrefixReservedMetadata = true;
 
     const auto uid = archive_entry_uid(entry);
     const auto gid = archive_entry_gid(entry);
@@ -175,7 +211,7 @@ ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
         report.regularBytes += static_cast<uint64_t>(size);
     }
     inspectMetadata(entry, path.value, report);
-    inspectType(entry, path.value, report);
+    inspectType(entry, path.value, rootPrefix, report, ociLayer);
     if (archive_read_data_skip(reader.get()) < ARCHIVE_WARN) break;
     progress.update(reader.get());
   }
