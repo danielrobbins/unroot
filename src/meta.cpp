@@ -103,6 +103,10 @@ static bool parseExtents(const nlohmann::json& value,
 static IdMapMetaResult parseIdMapMeta(const std::string& content) {
   try {
     auto value = nlohmann::json::parse(content);
+    // Unmanaged single-ID entry saves emulator settings, not an ownership map.
+    if (value.is_object() && value.size() == 1 &&
+        value.contains("qemuWrapper") && value["qemuWrapper"].is_object())
+      return {};
     if (!value.is_object() || !value.contains("version") ||
         value["version"] != MetaVersion || !value.contains("idmap") ||
         !value["idmap"].is_object()) {

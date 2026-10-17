@@ -147,6 +147,32 @@ TEST_CASE("single-ID mappings cannot become managed rootfs metadata") {
     CHECK_FALSE(std::filesystem::exists(tree.root / ".unroot"));
 }
 
+TEST_CASE("emulator settings alone do not record rootfs ownership") {
+    MetaTree tree;
+    std::filesystem::create_directory(tree.root / ".unroot");
+    REQUIRE(meta::updateQemuWrapper(tree.root, "/.unroot/bin/qemu-aarch64",
+                                   {}, "test"));
+
+    auto loaded = meta::readIdMap(tree.root);
+    CHECK_FALSE(loaded.found);
+    CHECK(loaded.error.empty());
+    CHECK(meta::loadMetaJson(tree.root).contains("qemuWrapper"));
+}
+
+TEST_CASE("emulator settings do not hide malformed ownership metadata") {
+    MetaTree tree;
+    std::filesystem::create_directory(tree.root / ".unroot");
+    REQUIRE(meta::updateQemuWrapper(tree.root, "/.unroot/bin/qemu-aarch64",
+                                   {}, "test"));
+    auto value = meta::loadMetaJson(tree.root);
+    value["idmap"] = nullptr;
+    REQUIRE(meta::atomicSaveMetaJson(tree.root, value));
+
+    auto loaded = meta::readIdMap(tree.root);
+    CHECK(loaded.found);
+    CHECK_FALSE(loaded.error.empty());
+}
+
 TEST_CASE("managed rootfs metadata rejects the retired single mode") {
     MetaTree tree;
     std::filesystem::create_directory(tree.root / ".unroot");
