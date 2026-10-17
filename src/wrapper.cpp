@@ -3,9 +3,11 @@
 // Built-in wrapper implementation.
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/auxv.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <limits.h>
@@ -23,6 +25,11 @@ using util::hostLogStep;
     std::fprintf(stderr, "[wrapper] missing executable or original program name\n");
     _exit(127);
   }
+  // QEMU loads by pathname; this wrapper's exec loses AT_EXECFD. Close the
+  // unused kernel-opened descriptor instead of leaking it into the guest.
+  errno = 0;
+  int execFd = static_cast<int>(::getauxval(AT_EXECFD));
+  if (errno == 0) ::close(execFd);
   std::string emuBinStr;
   std::vector<std::string> emuArgs;
   // Read /.unroot/meta.json for qemuWrapper settings (env-based config deprecated)

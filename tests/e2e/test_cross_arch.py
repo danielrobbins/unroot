@@ -127,6 +127,31 @@ def test_foreign_shebang_preserves_interpreter_and_script_arguments(unroot, argu
     ]
 
 
+@pytest.mark.parametrize("last_open", [9, 31, 254])
+@pytest.mark.parametrize("launcher", ["launcher", "probe"])
+def test_foreign_exec_closes_kernel_descriptor_not_callers_fds(
+    unroot, tmp_path, require_capability, last_open, launcher,
+):
+    compiler = os.environ.get("CROSS_CC", "")
+    require_capability(
+        bool(compiler) and shutil.which(compiler) is not None,
+        "descriptor checks require CROSS_CC", "cross_arch",
+    )
+    root = create_rootfs(tmp_path / "descriptors")
+    (root / "caller-data").write_text("hello", encoding="utf-8")
+    source = Path(__file__).parent / "fixtures" / "exec_fd_probe.c"
+    for cc, name in ((os.environ.get("CC", "cc"), "launcher"), (compiler, "probe")):
+        run_command([
+            cc, "-static", "-O2", "-o", str(root / "bin" / name), str(source),
+        ]).assert_ok()
+    result = unroot.run(
+        "enter", "--single", str(root), "--emulation-for", "/bin/probe",
+        "--", f"/bin/{launcher}", "launch", str(last_open), "5", timeout=90,
+    )
+    result.assert_ok()
+    assert result.stdout.strip() == "descriptors-ok"
+
+
 def test_foreign_architecture_execution(
     unroot: UnrootRunner,
     empty_rootfs: Path,
