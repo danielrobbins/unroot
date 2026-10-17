@@ -40,6 +40,9 @@ unroot enter ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 unroot enter \-\-single ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 sudo unroot enter \-\-native ROOT [OPTIONS] [\-\- COMMAND [ARGUMENTS...]]
 unroot pack ROOT ARCHIVE
+unroot pack \-\-single ROOT ARCHIVE
+unroot exclude add ROOT PATTERN...
+unroot exclude list ROOT
 unroot inject list ROOT [\-\-json]
 unroot inject add ROOT ITEM [ITEM...]
 unroot inject remove ROOT ITEM [ITEM...]
@@ -108,11 +111,13 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 .PP
 After extraction, \fBunpack\fR installs writable copies of the host's \fB/etc/hosts\fR and \fB/etc/resolv.conf\fR, plus an \fB/etc/mtab\fR link to \fB/proc/self/mounts\fR, by default. Their portable rootfs originals are preserved for later restoration and packing. See \fIROOTFS INJECTIONS\fR for the complete lifecycle and for \fB\-\-inject\fR controls that disable any default.
 .PP
-\fBunroot pack\fR requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling \fBunroot\-util\fR linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with \fIROOT\fR as its working directory, but is not chrooted, so no shell or archive tool is required inside \fIROOT\fR\&. Destination suffixes select compression filters such as \fB\&.gz\fR, \fB\&.xz\fR, and \fB\&.zst\fR when supported by the host libarchive.
+\fBunroot pack\fR validates the managed rootfs's recorded ownership model before capture. For an unmanaged, single\-owner build tree, use \fBunroot pack \-\-single ROOT ARCHIVE\fR: the invoking UID and GID become archive ID 0, without changing ownership on disk or requiring subordinate IDs. Files and POSIX ACL entries that cannot be represented by that mapping cause packing to fail, even with \fB\-\-force\fR\&. This option cannot override a recorded rich or native ownership map.
+.PP
+Archive operations use the sibling \fBunroot\-util\fR linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with \fIROOT\fR as its working directory, but is not chrooted, so no shell or archive tool is required inside \fIROOT\fR\&. Destination suffixes select compression filters such as \fB\&.gz\fR, \fB\&.xz\fR, and \fB\&.zst\fR when supported by the host libarchive.
 .PP
 When standard error is an interactive terminal, archive operations display live progress and average logical throughput in MiB/s. Inspection and extraction show determinate progress against the pinned archive input. Packing reports an indeterminate activity bar, the amount processed, and throughput because the final archive workload is not known without an additional rootfs traversal. Progress output is automatically omitted when standard error is redirected.
 .PP
-Only one \fBpack\fR, \fBunpack\fR, or \fBinject\fR operation may manage a rootfs at a time. These actions take an exclusive operating\-system lock on the pinned root directory and fail immediately when another rootfs\-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. \fBenter\fR does not mutate the injection registry and does not require this lock.
+Only one \fBpack\fR, \fBunpack\fR, \fBinject\fR, or \fBexclude\fR operation may manage a rootfs at a time. These actions take an exclusive operating\-system lock on the pinned root directory and fail immediately when another rootfs\-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. \fBenter\fR does not mutate either registry and does not require this lock. Stop programs that write to the rootfs before packing; the management lock does not freeze their writes.
 .PP
 \fBpack\fR records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host\-root\-owned copy of a rich rootfs:
 .RS 4
@@ -200,6 +205,27 @@ $ unroot inject clear \(ti/rootfs
 \fBunroot pack\fR does not alter the live rootfs. While creating the archive, it excludes each live injected file or link and substitutes the preserved original at that path. If the path was originally absent, it remains absent from the archive. Host DNS, host names, the generated mount\-table link, and custom injected content therefore do not leak into a portable rootfs archive.
 .PP
 The injection registry and preserved originals are private Unroot metadata and are excluded from archives. \fBpack\fR, \fBunpack\fR, and every \fBinject\fR operation share one rootfs lock. File installation and replacement are atomic, while ordinary concurrent \fBenter\fR operations only observe the current durable files and never perform competing injection cleanup.
+.SH ARCHIVE EXCLUSIONS
+.PP
+Exclusions control archive contents without changing the working rootfs. Unlike injections, they do not install files or preserve originals. They work with managed roots and unmanaged single\-owner build trees.
+.RS 4
+.nf
+$ unroot exclude add \(ti/rootfs '/etc/ssh/ssh_host_*'
+$ unroot exclude add \(ti/rootfs /build /cross\-tools /bridge\-tools '/tmp/*'
+$ unroot exclude list \(ti/rootfs
+$ unroot exclude list \(ti/rootfs \-\-json
+$ unroot exclude remove \(ti/rootfs '/tmp/*'
+$ unroot exclude clear \(ti/rootfs
+.fi
+.RE
+.PP
+\fBadd\fR records rules, including patterns that do not match any files yet; adding an existing rule is harmless. \fBremove\fR requires the exact registered pattern, not a filename matched by it. \fBclear\fR removes all exclusion rules. Neither operation deletes or restores rootfs files, and neither changes the injection registry.
+.PP
+Paths begin with \fB/\fR relative to \fIROOT\fR, not the host filesystem. Shell\-style \fB*\fR, \fB?\fR, and bracket expressions are supported. Quote patterns to prevent expansion by the caller's shell. Wildcards match dotfiles but do not cross \fB/\fR; a matching directory and all its descendants are omitted. \fB/tmp/*\fR therefore omits its contents but retains \fB/tmp\fR itself. Regexes, recursive \fB**\fR, escaped patterns, dot path components, and trailing slashes are not supported.
+.PP
+Successful \fBunpack\fR registers \fB/etc/ssh/ssh_host_*\fR by default. This prevents a subsequent pack from distributing that root's SSH server identity, including its host private keys. It does not remove keys during unpack or affect client keys in users' \fB\&.ssh\fR directories. To deliberately preserve the server identity in a future archive, remove that rule with \fBunroot exclude remove ROOT '/etc/ssh/ssh_host_*'\fR\&. \fB\-\-inject=\-*\fR disables injections, not this separate exclusion default. Existing roots gain no new rules merely by running \fBpack\fR\&.
+.PP
+Exclusions take precedence over injection restoration: matching preserved originals are also omitted from the archive. Rules are stored in \fBROOT/.unroot/exclusions.json\fR, outside the archive's payload. A destination created by unpack receives its own default rules, not the source's custom exclusion list. Malformed metadata stops packing rather than silently including files that should have been excluded. Exclusion management shares the archive operation lock.
 .SH EXECUTION MODEL
 .SS Command selection
 .PP
@@ -286,6 +312,9 @@ Enter an unmanaged host\-owned rootfs, or create a native rootfs with \fBunpack\
 .TP
 \fB\-\-force\fR
 Allow \fBpack\fR or \fBunpack\fR to continue after a recoverable libarchive metadata warning or a reported destination metadata limitation. The warning is still displayed. This option does not override unsafe archive structure, ownership\-map violations, corrupt data, or archive\-engine failures.
+.TP
+\fB\-\-single\fR
+For \fBpack\fR, interpret an unmanaged single\-owner tree using the invoking UID and GID as archive root. Does not require subordinate IDs, initialize an ownership record, or change source ownership. Unrepresentable file or POSIX ACL ownership is an error. See \fIROOTFS ARCHIVES\fR and \fIARCHIVE EXCLUSIONS\fR\&.
 .TP
 \fB\-\-id\-count COUNT\fR
 Set the number of subordinate UIDs and GIDs represented by a new rich root. The default is 65535. \fICOUNT\fR excludes rootfs ID 0, so a count of 100000 represents rootfs IDs 0 through 100000. The invoking account must have contiguous subordinate UID and GID allocations of at least this size. This option cannot be combined with \fB\-\-native\fR\&.

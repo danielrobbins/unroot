@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "archive_fd.hpp"
+#include "archive_exclusions.hpp"
 #include "archive_progress.hpp"
 
 namespace util {
@@ -105,10 +106,33 @@ int copyData(struct archive* source, struct archive* destination,
 using FileId = std::pair<la_int64_t, la_int64_t>;
 using FileLinks = std::map<FileId, std::string>;
 
+bool rootOnlyOwnership(struct archive_entry* entry) {
+  if (archive_entry_uid(entry) != 0 || archive_entry_gid(entry) != 0)
+    return false;
+  const int aclTypes = ARCHIVE_ENTRY_ACL_TYPE_ACCESS |
+                       ARCHIVE_ENTRY_ACL_TYPE_DEFAULT;
+  archive_entry_acl_reset(entry, aclTypes);
+  int type, permissions, tag, qualifier;
+  const char* name;
+  while (archive_entry_acl_next(entry, aclTypes, &type, &permissions, &tag,
+                                &qualifier, &name) == ARCHIVE_OK) {
+    if ((tag == ARCHIVE_ENTRY_ACL_USER || tag == ARCHIVE_ENTRY_ACL_GROUP) &&
+        qualifier != 0)
+      return false;
+  }
+  return true;
+}
+
 bool writeEntry(struct archive* disk, struct archive* writer,
                 struct archive_entry* entry, const std::string& name,
-                FileLinks& links, ArchiveProgress& progress, bool force,
+                FileLinks& links, ArchiveProgress& progress, bool force, bool rootOnly,
                 std::string& message) {
+  // The single-ID namespace exposes unmapped owners as overflow IDs. Never
+  // publish those IDs as if they described the original rootfs ownership.
+  if (rootOnly && !rootOnlyOwnership(entry)) {
+    message = "--single cannot represent file or ACL ownership: " + name;
+    return false;
+  }
   archive_entry_set_pathname(entry, name.c_str());
   if (archive_entry_filetype(entry) != AE_IFREG)
     archive_entry_set_size(entry, 0);
@@ -163,7 +187,7 @@ bool configureWriterFilter(struct archive* writer, const std::string& filter,
 bool writeSubstitution(
     struct archive* writer,
     const archiveio::Substitution& substitution, FileLinks& links,
-    ArchiveProgress& progress, bool force, std::string& message) {
+    ArchiveProgress& progress, bool force, bool rootOnly, std::string& message) {
   if (!validRelativePath(substitution.source) ||
       !validRelativePath(substitution.destination)) {
     message = "invalid archive substitution path";
@@ -186,7 +210,7 @@ bool writeSubstitution(
   if (!acceptWarning(disk.get(), status, force, message) ||
       status == ARCHIVE_EOF ||
       !writeEntry(disk.get(), writer, entry.get(), substitution.destination,
-                  links, progress, force, message)) {
+                  links, progress, force, rootOnly, message)) {
     if (status == ARCHIVE_EOF && message.empty())
       message = "archive substitution source is missing";
     archive_read_close(disk.get());
@@ -256,8 +280,9 @@ int unpackArchive(int descriptor, bool force, std::string& message,
 
 int packArchive(int descriptor, const std::string& filter,
                 const std::vector<std::string>& excludes,
+                const std::vector<std::string>& patterns,
                 const std::vector<archiveio::Substitution>& substitutions,
-                bool force,
+                bool force, bool rootOnly,
                 std::string& message, int progressDescriptor,
                 ProgressStyle progressStyle) {
   UniqueFd output =
@@ -293,14 +318,15 @@ int packArchive(int descriptor, const std::string& filter,
       return 1;
     }
     const char* name = archive_entry_pathname(entry.get());
-    if (excluded(name, excludes)) {
+    if (excluded(name, excludes) ||
+        archiveio::excludedByPattern(normalized(name), patterns)) {
       archive_entry_clear(entry.get());
       continue;
     }
     if (archive_read_disk_can_descend(disk.get()))
       archive_read_disk_descend(disk.get());
     if (!writeEntry(disk.get(), writer.get(), entry.get(),
-                    name ? name : "", links, progress, force, message)) {
+                    name ? name : "", links, progress, force, rootOnly, message)) {
       if (message.empty()) archiveFailure(writer.get(), message);
       archive_read_close(disk.get());
       archive_write_close(writer.get());
@@ -309,7 +335,8 @@ int packArchive(int descriptor, const std::string& filter,
     archive_entry_clear(entry.get());
   }
   for (const auto& substitution : substitutions) {
-    if (!writeSubstitution(writer.get(), substitution, links, progress, force,
+    if (archiveio::excludedByPattern(substitution.destination, patterns)) continue;
+    if (!writeSubstitution(writer.get(), substitution, links, progress, force, rootOnly,
                            message)) {
       archive_read_close(disk.get());
       archive_write_close(writer.get());

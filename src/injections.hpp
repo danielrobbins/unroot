@@ -34,6 +34,7 @@ struct Entry {
 
 struct ArchivePlan {
   std::vector<std::string> excludes;
+  std::vector<std::string> patterns;
   std::vector<archiveio::Substitution> substitutions;
   std::string error;
 

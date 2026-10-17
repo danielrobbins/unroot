@@ -29,6 +29,9 @@ unroot enter ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot enter --single ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 sudo unroot enter --native ROOT [OPTIONS] [-- COMMAND [ARGUMENTS...]]
 unroot pack ROOT ARCHIVE
+unroot pack --single ROOT ARCHIVE
+unroot exclude add ROOT PATTERN...
+unroot exclude list ROOT
 unroot inject list ROOT [--json]
 unroot inject add ROOT ITEM [ITEM...]
 unroot inject remove ROOT ITEM [ITEM...]
@@ -93,11 +96,13 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 
 After extraction, `unpack` installs writable copies of the host's `/etc/hosts` and `/etc/resolv.conf`, plus an `/etc/mtab` link to `/proc/self/mounts`, by default. Their portable rootfs originals are preserved for later restoration and packing. See *ROOTFS INJECTIONS* for the complete lifecycle and for `--inject` controls that disable any default.
 
-`unroot pack` requires a managed rootfs and validates its recorded ownership model before capture. Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.
+`unroot pack` validates the managed rootfs's recorded ownership model before capture. For an unmanaged, single-owner build tree, use `unroot pack --single ROOT ARCHIVE`: the invoking UID and GID become archive ID 0, without changing ownership on disk or requiring subordinate IDs. Files and POSIX ACL entries that cannot be represented by that mapping cause packing to fail, even with `--force`. This option cannot override a recorded rich or native ownership map.
+
+Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.
 
 When standard error is an interactive terminal, archive operations display live progress and average logical throughput in MiB/s. Inspection and extraction show determinate progress against the pinned archive input. Packing reports an indeterminate activity bar, the amount processed, and throughput because the final archive workload is not known without an additional rootfs traversal. Progress output is automatically omitted when standard error is redirected.
 
-Only one `pack`, `unpack`, or `inject` operation may manage a rootfs at a time. These actions take an exclusive operating-system lock on the pinned root directory and fail immediately when another rootfs-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. `enter` does not mutate the injection registry and does not require this lock.
+Only one `pack`, `unpack`, `inject`, or `exclude` operation may manage a rootfs at a time. These actions take an exclusive operating-system lock on the pinned root directory and fail immediately when another rootfs-management operation is active. Process exit automatically releases the lock, with no lock file to become stale. `enter` does not mutate either registry and does not require this lock. Stop programs that write to the rootfs before packing; the management lock does not freeze their writes.
 
 `pack` records the numeric ownership visible inside the managed root rather than its shifted host representation. The archive can therefore be unpacked under a different ownership model. To create a conventional host-root-owned copy of a rich rootfs:
 
@@ -183,6 +188,27 @@ $ unroot inject clear ~/rootfs
 `unroot pack` does not alter the live rootfs. While creating the archive, it excludes each live injected file or link and substitutes the preserved original at that path. If the path was originally absent, it remains absent from the archive. Host DNS, host names, the generated mount-table link, and custom injected content therefore do not leak into a portable rootfs archive.
 
 The injection registry and preserved originals are private Unroot metadata and are excluded from archives. `pack`, `unpack`, and every `inject` operation share one rootfs lock. File installation and replacement are atomic, while ordinary concurrent `enter` operations only observe the current durable files and never perform competing injection cleanup.
+
+== @section exclusions: ARCHIVE EXCLUSIONS [priority=39]
+
+Exclusions control archive contents without changing the working rootfs. Unlike injections, they do not install files or preserve originals. They work with managed roots and unmanaged single-owner build trees.
+
+```console
+$ unroot exclude add ~/rootfs '/etc/ssh/ssh_host_*'
+$ unroot exclude add ~/rootfs /build /cross-tools /bridge-tools '/tmp/*'
+$ unroot exclude list ~/rootfs
+$ unroot exclude list ~/rootfs --json
+$ unroot exclude remove ~/rootfs '/tmp/*'
+$ unroot exclude clear ~/rootfs
+```
+
+`add` records rules, including patterns that do not match any files yet; adding an existing rule is harmless. `remove` requires the exact registered pattern, not a filename matched by it. `clear` removes all exclusion rules. Neither operation deletes or restores rootfs files, and neither changes the injection registry.
+
+Paths begin with `/` relative to *ROOT*, not the host filesystem. Shell-style `*`, `?`, and bracket expressions are supported. Quote patterns to prevent expansion by the caller's shell. Wildcards match dotfiles but do not cross `/`; a matching directory and all its descendants are omitted. `/tmp/*` therefore omits its contents but retains `/tmp` itself. Regexes, recursive `**`, escaped patterns, dot path components, and trailing slashes are not supported.
+
+Successful `unpack` registers `/etc/ssh/ssh_host_*` by default. This prevents a subsequent pack from distributing that root's SSH server identity, including its host private keys. It does not remove keys during unpack or affect client keys in users' `.ssh` directories. To deliberately preserve the server identity in a future archive, remove that rule with `unroot exclude remove ROOT '/etc/ssh/ssh_host_*'`. `--inject=-*` disables injections, not this separate exclusion default. Existing roots gain no new rules merely by running `pack`.
+
+Exclusions take precedence over injection restoration: matching preserved originals are also omitted from the archive. Rules are stored in `ROOT/.unroot/exclusions.json`, outside the archive's payload. A destination created by unpack receives its own default rules, not the source's custom exclusion list. Malformed metadata stops packing rather than silently including files that should have been excluded. Exclusion management shares the archive operation lock.
 
 == @section execution-model: EXECUTION MODEL [priority=40]
 
@@ -279,6 +305,10 @@ Enter an unmanaged host-owned rootfs, or create a native rootfs with `unpack`. R
 @syntax --force
 
 Allow `pack` or `unpack` to continue after a recoverable libarchive metadata warning or a reported destination metadata limitation. The warning is still displayed. This option does not override unsafe archive structure, ownership-map violations, corrupt data, or archive-engine failures.
+
+== @option pack.single: --single [parent=section:options, priority=16]
+
+For `pack`, interpret an unmanaged single-owner tree using the invoking UID and GID as archive root. Does not require subordinate IDs, initialize an ownership record, or change source ownership. Unrepresentable file or POSIX ACL ownership is an error. See *ROOTFS ARCHIVES* and *ARCHIVE EXCLUSIONS*.
 
 == @option unpack.id-count: --id-count COUNT [parent=section:options, priority=17]
 

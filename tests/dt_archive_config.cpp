@@ -47,6 +47,15 @@ TEST_CASE("pack accepts explicit metadata-loss override") {
   CHECK(config.force);
 }
 
+TEST_CASE("pack accepts explicit single-ID ownership") {
+  ToBeParsedArgs args;
+  args.action_name = "pack";
+  args.args = {"--single", "root", "rootfs.tar.gz"};
+  PackConfig config;
+  config.parse(args);
+  CHECK(config.single);
+}
+
 TEST_CASE("unpack defaults new rootfs trees to rich mapping") {
   ToBeParsedArgs args;
   args.action_name = "unpack";

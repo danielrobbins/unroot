@@ -152,6 +152,7 @@ CPP_SOURCES := \
 	$(SRC_DIR)/binfmt.cpp \
 	$(SRC_DIR)/meta.cpp \
 	$(SRC_DIR)/injections.cpp \
+	$(SRC_DIR)/exclusions.cpp \
 	$(SRC_DIR)/archive_report.cpp \
 	$(SRC_DIR)/archive_input.cpp \
 	$(SRC_DIR)/archive_inspector.cpp \
@@ -169,6 +170,8 @@ CPP_SOURCES := \
 	$(SRC_DIR)/actions/archive_config.cpp \
 	$(SRC_DIR)/actions/archive_action.cpp \
 	$(SRC_DIR)/actions/injection_config.cpp \
+	$(SRC_DIR)/actions/rootfs_items_config.cpp \
+	$(SRC_DIR)/actions/exclusion_action.cpp \
 	$(SRC_DIR)/actions/injection_action.cpp \
 	$(SRC_DIR)/actions/inspect_config.cpp \
 	$(SRC_DIR)/actions/inspect_action.cpp \
@@ -605,6 +608,7 @@ DOCTEST_HARNESS_SRCS := \
 	src/actions/config_base.cpp \
 	src/actions/archive_config.cpp \
 	src/actions/injection_config.cpp \
+	src/actions/rootfs_items_config.cpp \
 	src/actions/enter_config.cpp \
 	src/actions/unified_action_registry.cpp \
 	src/actions/parsed_args.cpp \
@@ -649,7 +653,7 @@ test: $(UTIL_BIN) doctest
 
 .PHONY: e2e
 e2e: $(TARGET_BIN) $(UTIL_BIN)
-	@$(PYTEST) -q tests/e2e/test_native_enter.py tests/e2e/test_archive.py tests/e2e/test_rich_idmap.py tests/e2e/test_rootfs_journey.py
+	@$(PYTEST) -q tests/e2e/test_native_enter.py tests/e2e/test_archive.py tests/e2e/test_single_pack.py tests/e2e/test_exclusions.py tests/e2e/test_rich_idmap.py tests/e2e/test_rootfs_journey.py
 
 .PHONY: e2e-cross
 e2e-cross: $(TARGET_BIN) $(UTIL_BIN)

@@ -37,10 +37,13 @@ void PackConfig::configure_parser() {
   ActionConfig::configure_parser();
   parser_
       .add_flag_meta(
+          {"--single"}, "Archive an unmanaged caller-owned rootfs as root",
+          [this]() { single = true; })
+      .add_flag_meta(
           {"--force"}, "Accept recoverable archive metadata warnings",
           [this]() { force = true; })
       .add_flag_meta({"--help", "-h"}, "Display help for this action", []() {})
-      .add_positional_meta("ROOT", "Mapped root filesystem to archive",
+      .add_positional_meta("ROOT", "Root filesystem to archive",
                            [this](const std::string& value) { root = value; })
       .add_positional_meta(
           "ARCHIVE", "Destination tar archive",

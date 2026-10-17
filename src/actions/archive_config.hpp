@@ -17,6 +17,7 @@ class PackConfig : public ActionConfig {
   std::string root;
   std::string archive;
   bool force = false;
+  bool single = false;
 
   std::string getActionName() const override { return "pack"; }
   void validate() const override;
