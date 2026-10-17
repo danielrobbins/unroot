@@ -11,10 +11,13 @@ int EnterAction::execute(const EnterConfig&) {
 
 // Private helpers (provide trivial definitions to satisfy linker; not used in doctests)
 std::unique_ptr<EmuPlan> EnterAction::setupEmulation(
-    const EnterConfig&, const util::IdMapPlan&) { return {}; }
+    const EnterConfig&, const util::IdMapPlan&, const meta::RootLayout&) {
+    return {};
+}
 util::IdMapPlan EnterAction::resolveIdMap(const EnterConfig&) { return {}; }
 int EnterAction::executeNamespace(const EnterConfig&,
                                   const std::unique_ptr<EmuPlan>&,
-                                  const util::IdMapPlan&) { return 0; }
+                                  const util::IdMapPlan&,
+                                  const meta::RootLayout&) { return 0; }
 
 } // namespace actions

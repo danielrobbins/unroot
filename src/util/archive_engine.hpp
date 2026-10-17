@@ -11,6 +11,9 @@ namespace util {
 int unpackArchive(int descriptor, bool force, std::string& message,
                   int progressDescriptor = -1,
                   ProgressStyle progressStyle = ProgressStyle::Ascii);
+int applyOciLayer(int descriptor, bool force, std::string& message,
+                  int progressDescriptor = -1,
+                  ProgressStyle progressStyle = ProgressStyle::Ascii);
 int packArchive(int descriptor, const std::string& filter,
                 const std::vector<std::string>& excludes,
                 const std::vector<std::string>& patterns,

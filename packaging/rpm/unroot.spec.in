@@ -43,6 +43,7 @@ python3 -m pytest -q tests/test_docatoms.py tests/test_packaging.py tests/test_r
 
 %files
 %license LICENSE
+%license %{_docdir}/unroot/THIRD_PARTY_LICENSES.md
 %doc README.md RELEASE_NOTES.md
 %{_bindir}/unroot
 %{_bindir}/unroot-util

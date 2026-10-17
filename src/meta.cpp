@@ -1,9 +1,12 @@
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <ctime>
 #include <climits>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/random.h>
 #include <unistd.h>
 #include "nlohmann/json.hpp"
 #include "linuxns.hpp"
@@ -18,6 +21,48 @@ static constexpr const char* MetaVersion = "unroot.meta/v1";
 static constexpr const char* MetaDir = "/.unroot";
 static constexpr const char* MetaPath = "/.unroot/meta.json";
 static constexpr const char* MetaLock = "/.unroot/meta.lock";
+
+static bool rootIdentity(std::string& identity) {
+  std::array<unsigned char, 16> random {};
+  size_t offset = 0;
+  while (offset < random.size()) {
+    const ssize_t count =
+        ::getrandom(random.data() + offset, random.size() - offset, 0);
+    if (count > 0) {
+      offset += static_cast<size_t>(count);
+    } else if (count < 0 && errno == EINTR) {
+      continue;
+    } else {
+      return false;
+    }
+  }
+  static constexpr char hex[] = "0123456789abcdef";
+  identity.clear();
+  identity.reserve(random.size() * 2);
+  for (unsigned char value : random) {
+    identity.push_back(hex[value >> 4]);
+    identity.push_back(hex[value & 0x0f]);
+  }
+  return true;
+}
+
+static bool validRootIdentity(const nlohmann::json& value) {
+  if (!value.is_string()) return false;
+  const std::string identity = value.get<std::string>();
+  return identity.size() == 32 &&
+         std::all_of(identity.begin(), identity.end(), [](unsigned char c) {
+           return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+         });
+}
+
+std::string RootLayout::inManagedRoot(
+    const std::string& absolutePath) const {
+  if (!prefixed()) return absolutePath;
+  return "/" + rootPrefix +
+         (absolutePath.empty() || absolutePath.front() != '/'
+              ? "/" + absolutePath
+              : absolutePath);
+}
 
 struct MetaPaths { std::string env; std::string rootfs; };
 struct MetaObj {
@@ -253,6 +298,108 @@ IdMapMetaResult resolveIdMap(const fs::path& rootfs, util::IdMapMode mode,
     }
   }
   return stored;
+}
+
+bool validRootPrefix(const std::string& prefix) {
+  if (prefix.empty() || prefix.front() == '/' || prefix.back() == '/')
+    return false;
+  size_t start = 0;
+  while (start <= prefix.size()) {
+    const size_t end = prefix.find('/', start);
+    const std::string part = prefix.substr(
+        start, (end == std::string::npos ? prefix.size() : end) - start);
+    if (part.empty() || part == "." || part == "..") return false;
+    if (end == std::string::npos) return true;
+    start = end + 1;
+  }
+  return false;
+}
+
+RootLayoutResult resolveRootLayout(const fs::path& rootfs) {
+  RootLayout layout;
+  std::error_code pathError;
+  layout.managedRoot = fs::absolute(rootfs, pathError).lexically_normal();
+  if (pathError) return {{}, "unable to resolve managed root path"};
+  layout.effectiveRoot = layout.managedRoot;
+  auto [available, content] = readMeta(rootfs);
+  if (!available) return {std::move(layout), {}};
+  try {
+    const auto value = nlohmann::json::parse(content);
+    if (!value.contains("layout")) return {std::move(layout), {}};
+    const auto& stored = value["layout"];
+    if (!stored.is_object() || !stored.contains("root_prefix") ||
+        !stored["root_prefix"].is_string())
+      return {{}, "rootfs metadata has a malformed layout"};
+    layout.rootPrefix = stored["root_prefix"].get<std::string>();
+    if (!validRootPrefix(layout.rootPrefix))
+      return {{}, "rootfs metadata has an invalid root prefix"};
+  } catch (...) {
+    return {{}, "unable to parse rootfs metadata"};
+  }
+
+  util::Rootfs managed(rootfs.string());
+  layout.effectiveFd = managed.directory("/" + layout.rootPrefix);
+  if (!layout.effectiveFd)
+    return {{}, "recorded root prefix is missing or not a real directory: " +
+                    layout.rootPrefix};
+  layout.effectiveRoot = layout.managedRoot / layout.rootPrefix;
+  return {std::move(layout), {}};
+}
+
+bool setRootPrefix(const fs::path& rootfs, const std::string& prefix,
+                   std::string& error) {
+  if (!validRootPrefix(prefix)) {
+    error = "root prefix must be a normalized relative path";
+    return false;
+  }
+  util::Rootfs root(rootfs.string());
+  if (!root || !root.directory("/" + prefix)) {
+    error = "root prefix is missing or not a real directory: " + prefix;
+    return false;
+  }
+  auto value = loadMetaJson(rootfs);
+  if (!value.is_object() || value.empty()) {
+    error = "rootfs metadata is unavailable";
+    return false;
+  }
+  value["layout"] = {{"root_prefix", prefix}};
+  if (!atomicSaveMetaJson(rootfs, value)) {
+    error = "unable to record the root prefix";
+    return false;
+  }
+  return true;
+}
+
+bool setOciProvenance(const fs::path& rootfs,
+                      const nlohmann::json& provenance,
+                      std::string& error) {
+  if (!provenance.is_object()) {
+    error = "OCI provenance is malformed";
+    return false;
+  }
+  auto value = loadMetaJson(rootfs);
+  if (!value.is_object() || value.empty()) {
+    error = "rootfs metadata is unavailable";
+    return false;
+  }
+  if (value.contains("root_id") && !validRootIdentity(value["root_id"])) {
+    error = "rootfs metadata has a malformed root identity";
+    return false;
+  }
+  if (!value.contains("root_id")) {
+    std::string identity;
+    if (!rootIdentity(identity)) {
+      error = "unable to generate rootfs identity";
+      return false;
+    }
+    value["root_id"] = std::move(identity);
+  }
+  value["oci"] = provenance;
+  if (!atomicSaveMetaJson(rootfs, value)) {
+    error = "unable to record OCI provenance";
+    return false;
+  }
+  return true;
 }
 
 bool atomicSaveMetaJson(const fs::path& rootfs, const nlohmann::json& j) {

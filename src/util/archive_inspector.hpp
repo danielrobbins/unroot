@@ -16,7 +16,8 @@ struct ArchiveScanResult {
 
 ArchiveScanResult inspectArchive(
     int descriptor, int progressDescriptor = -1,
-    ProgressStyle progressStyle = ProgressStyle::Ascii);
+    ProgressStyle progressStyle = ProgressStyle::Ascii,
+    const std::string& rootPrefix = {}, bool ociLayer = false);
 std::string archiveLibraryVersion();
 
 }  // namespace util

@@ -18,6 +18,7 @@
 #include "meta.hpp"
 #include "exclusions.hpp"
 #include "injections.hpp"
+#include "oci.hpp"
 #include "util/archive_lock.hpp"
 #include "util/error_map.hpp"
 #include "util/fd.hpp"
@@ -179,9 +180,12 @@ int ArchiveAction::perform(const PackConfig& config) {
                    ? util::makeSingleIdMap(::getuid(), ::getgid())
                    : resolvedMap(pinnedRoot, stored.plan.mode,
                                  util::subordinateIdCount(stored.plan), false);
-  auto injectionPlan = injections::archivePlan(pinnedRoot);
+  auto resolvedLayout = meta::resolveRootLayout(pinnedRoot);
+  if (!resolvedLayout) fail("layout: " + resolvedLayout.error);
+  auto injectionPlan = injections::archivePlan(resolvedLayout.layout);
   if (!injectionPlan) fail(injectionPlan.error);
-  if (!exclusions::list(pinnedRoot, injectionPlan.patterns, injectionPlan.error))
+  if (!exclusions::archivePatterns(resolvedLayout.layout, injectionPlan.patterns,
+                                   injectionPlan.error))
     fail(injectionPlan.error);
 
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
@@ -206,21 +210,35 @@ int ArchiveAction::perform(const UnpackConfig& config) {
   const fs::path pinnedRoot = archiveLock.pinnedRoot();
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (rootfsHasPayload(pinnedRoot)) fail("ROOT must be empty before unpacking");
+  auto inspection =
+      archiveio::Inspector().inspect(input, config.rootPrefix);
+  if (!inspection) fail("unable to inspect archive: " + inspection.error);
+  if (inspection.report.reservedMetadata)
+    fail("archive contains the reserved .unroot metadata tree");
+  if (inspection.report.rootPrefixReservedMetadata)
+    fail("archive root prefix contains the reserved .unroot metadata tree");
+  std::unique_ptr<oci::ImportPlan> ociPlan;
+  if (inspection.report.ociLayout) {
+    if (!config.flatten)
+      fail("archive is an OCI image layout; use unpack --flatten to import "
+           "its layers as a normal root filesystem");
+    auto prepared = oci::prepare(input, backend, config.platform);
+    if (!prepared) fail("unable to prepare OCI image: " + prepared.error);
+    ociPlan = std::move(prepared.plan);
+  } else if (config.flatten) {
+    fail("--flatten requires an OCI image-layout archive");
+  }
+  if (inspection.report.unsafePaths.count != 0)
+    fail("archive contains paths outside the rootfs");
+  if (!config.rootPrefix.empty() && !inspection.report.rootPrefixPresent)
+    fail("archive does not contain root prefix: " + config.rootPrefix);
   const auto mode = config.native ? util::IdMapMode::Native
                                   : util::IdMapMode::Rich;
   auto idmap = unpackMap(pinnedRoot, mode, config.idCount,
                          config.idCountSpecified);
-  auto inspection = archiveio::Inspector().inspect(input);
-  if (!inspection) fail("unable to inspect archive: " + inspection.error);
-  if (inspection.report.reservedMetadata)
-    fail("archive contains the reserved .unroot metadata tree");
-  if (inspection.report.ociLayout)
-    fail("archive is an OCI image layout; unroot unpack currently expects a "
-         "raw rootfs tar archive or an extracted OCI layer");
-  if (inspection.report.unsafePaths.count != 0)
-    fail("archive contains paths outside the rootfs");
-  requireMappedOwnership(inspection.report, idmap);
-  requireFilesystemCapabilities(inspection.report, pinnedRoot, config.force);
+  const auto& rootfsReport = ociPlan ? ociPlan->report() : inspection.report;
+  requireMappedOwnership(rootfsReport, idmap);
+  requireFilesystemCapabilities(rootfsReport, pinnedRoot, config.force);
   archiveLock.preserveRoot();
   auto initialized = meta::initializeIdMap(pinnedRoot, idmap, root);
   if (!initialized) fail("idmap: " + initialized.error);
@@ -228,16 +246,34 @@ int ArchiveAction::perform(const UnpackConfig& config) {
     fail("rootfs ownership mode changed during initialization");
 
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
-  const int result =
-      backend.extract(pinnedRoot, initialized.plan, input, config.force);
+  int result = 0;
+  if (ociPlan) {
+    for (const auto& layer : ociPlan->image().layers) {
+      archiveio::Input layerInput(layer.archive);
+      if (!layerInput) fail(layerInput.error());
+      result = backend.applyLayer(pinnedRoot, initialized.plan, layerInput,
+                                  config.force);
+      if (result != 0) break;
+    }
+  } else {
+    result = backend.extract(pinnedRoot, initialized.plan, input, config.force);
+  }
   if (result == -1) fail("unable to prepare archive for extraction");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (result == 0) {
     std::string error;
     if (!exclusions::update(pinnedRoot.string(), "add", {exclusions::HostKeys}, error))
       fail("exclusions: " + error);
+    if (!config.rootPrefix.empty() &&
+        !meta::setRootPrefix(pinnedRoot, config.rootPrefix, error))
+      fail("layout: " + error);
+    if (ociPlan &&
+        !meta::setOciProvenance(pinnedRoot, ociPlan->provenance(), error))
+      fail("OCI metadata: " + error);
+    auto resolvedLayout = meta::resolveRootLayout(pinnedRoot);
+    if (!resolvedLayout) fail("layout: " + resolvedLayout.error);
     if (!injections::add(
-            pinnedRoot.string(), initialized.plan,
+            resolvedLayout.layout, initialized.plan,
             injections::defaults(config.disabledInjections), error))
       fail("injections: " + error);
   }

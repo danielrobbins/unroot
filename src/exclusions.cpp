@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "nlohmann/json.hpp"
+#include "meta.hpp"
 #include "util/rootfs.hpp"
 
 namespace exclusions {
@@ -57,6 +58,20 @@ bool list(const std::string& rootfs, std::vector<std::string>& patterns,
     error = "malformed exclusion registry";
     return false;
   }
+}
+
+bool archivePatterns(const meta::RootLayout& layout,
+                     std::vector<std::string>& patterns, std::string& error) {
+  if (!list(layout.managedRoot.string(), patterns, error)) return false;
+  if (!layout.prefixed()) return true;
+  // The prefix is a literal directory name, not part of the user's glob.
+  std::string prefix = "/";
+  for (char ch : layout.rootPrefix) {
+    if (std::string("\\*?[").find(ch) != std::string::npos) prefix += '\\';
+    prefix += ch;
+  }
+  for (auto& pattern : patterns) pattern.insert(0, prefix);
+  return true;
 }
 
 bool update(const std::string& rootfs, const std::string& operation,

@@ -35,6 +35,13 @@ bool unsignedValue(const nlohmann::json& value, const char* name,
 }  // namespace
 
 nlohmann::json ArchiveReport::toJson() const {
+  nlohmann::json layout =
+      {{"reserved_metadata", reservedMetadata}, {"oci", ociLayout}};
+  if (!rootPrefix.empty()) {
+    layout["root_prefix"] = rootPrefix;
+    layout["root_prefix_present"] = rootPrefixPresent;
+    layout["root_prefix_reserved_metadata"] = rootPrefixReservedMetadata;
+  }
   return {
       {"format", format},
       {"filters", filters},
@@ -42,8 +49,7 @@ nlohmann::json ArchiveReport::toJson() const {
       {"regular_bytes", regularBytes},
       {"max_uid", maxUid},
       {"max_gid", maxGid},
-      {"layout",
-       {{"reserved_metadata", reservedMetadata}, {"oci", ociLayout}}},
+      {"layout", std::move(layout)},
       {"metadata",
        {{"unsafe_paths", findingJson(unsafePaths)},
         {"acls", findingJson(acls)},
@@ -95,6 +101,21 @@ ReportResult parseRecord(const std::string& record) {
       return {{}, "invalid archive inspection response"};
     report.reservedMetadata = layout["reserved_metadata"].get<bool>();
     report.ociLayout = layout["oci"].get<bool>();
+    if (layout.contains("root_prefix") ||
+        layout.contains("root_prefix_present") ||
+        layout.contains("root_prefix_reserved_metadata")) {
+      if (!layout.contains("root_prefix") ||
+          !layout["root_prefix"].is_string() ||
+          !layout.contains("root_prefix_present") ||
+          !layout["root_prefix_present"].is_boolean() ||
+          !layout.contains("root_prefix_reserved_metadata") ||
+          !layout["root_prefix_reserved_metadata"].is_boolean())
+        return {{}, "invalid archive inspection response"};
+      report.rootPrefix = layout["root_prefix"].get<std::string>();
+      report.rootPrefixPresent = layout["root_prefix_present"].get<bool>();
+      report.rootPrefixReservedMetadata =
+          layout["root_prefix_reserved_metadata"].get<bool>();
+    }
 
     const auto& metadata = value["metadata"];
     if (!parseFinding(metadata, "unsafe_paths", report.unsafePaths) ||

@@ -25,6 +25,9 @@ struct ArchiveReport {
   uint64_t maxGid = 0;
   bool reservedMetadata = false;
   bool ociLayout = false;
+  std::string rootPrefix;
+  bool rootPrefixPresent = false;
+  bool rootPrefixReservedMetadata = false;
   Finding unsafePaths;
   Finding acls;
   Finding xattrs;

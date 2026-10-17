@@ -157,7 +157,7 @@ EmuPlan Manager::prepare() {
     return {};
   }
 
-  if (!installSelfAsWrapper(settings_.root)) {
+  if (!installSelfAsWrapper(settings_.metadataRoot)) {
     throw AppException(
         util::make_error(util::LibErr::Io, 0,
                          "failed to install the Unroot emulation wrapper"),
@@ -174,7 +174,7 @@ EmuPlan Manager::prepare() {
 
   std::vector<std::string> arguments;
   if (!settings_.cpu.empty()) arguments = {"-cpu", settings_.cpu};
-  if (!meta::updateQemuWrapper(settings_.root, plan.target, arguments,
+  if (!meta::updateQemuWrapper(settings_.metadataRoot, plan.target, arguments,
                                UNROOT_GIT_SHA)) {
     throw AppException(
         util::make_error(util::LibErr::Io, 0,

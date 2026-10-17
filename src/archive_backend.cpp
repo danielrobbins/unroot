@@ -63,6 +63,16 @@ UniqueFd childDescriptor(int descriptor) {
   return UniqueFd(::fcntl(descriptor, F_DUPFD, STDERR_FILENO + 1));
 }
 
+std::string helperError(util::HostHelperResult result,
+                        const std::string& fallback) {
+  if (!result.error.empty()) return std::move(result.error);
+  if (result.truncated) return "oversized response from unroot-util";
+  while (!result.output.empty() &&
+         std::isspace(static_cast<unsigned char>(result.output.back())))
+    result.output.pop_back();
+  return result.output.empty() ? fallback : std::move(result.output);
+}
+
 }  // namespace
 
 Backend::Backend() : helper_(util::siblingHostHelper()) {
@@ -109,6 +119,56 @@ int Backend::extract(const fs::path& root, const util::IdMapPlan& idmap,
   util::ProgressOutput progress;
   progress.appendTo(arguments);
   return run(root, idmap, std::move(arguments));
+}
+
+int Backend::applyLayer(const fs::path& root, const util::IdMapPlan& idmap,
+                        const archiveio::Input& input, bool force) const {
+  UniqueFd archive = input.duplicateForChild();
+  if (!archive) return -1;
+  std::vector<std::string> arguments{
+      helper_, "archive", "apply-layer", "--fd",
+      std::to_string(archive.get())};
+  if (force) arguments.push_back("--force");
+  util::ProgressOutput progress;
+  progress.appendTo(arguments);
+  return run(root, idmap, std::move(arguments));
+}
+
+bool Backend::stageOci(const archiveio::Input& input,
+                       const fs::path& destination,
+                       std::string& error) const {
+  UniqueFd archive = input.duplicateForChild();
+  if (!archive) {
+    error = "unable to prepare OCI image for staging";
+    return false;
+  }
+  auto result = util::runHostHelper(
+      {"archive", "stage-oci", "--fd", std::to_string(archive.get())},
+      64 * 1024, helper_, destination.string());
+  if (result) return true;
+  error = helperError(std::move(result), "unroot-util could not stage OCI image");
+  return false;
+}
+
+bool Backend::decompressLayer(const archiveio::Input& input,
+                              int outputDescriptor,
+                              const std::string& expectedFilter,
+                              std::string& error) const {
+  UniqueFd archive = input.duplicateForChild();
+  UniqueFd output = childDescriptor(outputDescriptor);
+  if (!archive || !output) {
+    error = "unable to prepare OCI layer for decompression";
+    return false;
+  }
+  auto result = util::runHostHelper(
+      {"archive", "decompress", "--fd", std::to_string(archive.get()),
+       "--output-fd", std::to_string(output.get()), "--filter",
+       expectedFilter},
+      64 * 1024, helper_);
+  if (result) return true;
+  error = helperError(std::move(result),
+                      "unroot-util could not decompress OCI layer");
+  return false;
 }
 
 }  // namespace archive

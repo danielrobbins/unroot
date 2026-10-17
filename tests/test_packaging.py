@@ -1,4 +1,5 @@
 import platform
+from pathlib import Path
 
 import pytest
 
@@ -54,3 +55,23 @@ def test_package_build_refuses_cross_architecture_host(monkeypatch):
 def test_package_versions_reject_unsupported_forms(version):
     with pytest.raises(ValueError, match="unsupported VERSION"):
         package_release.version_parts(version)
+
+
+def test_binary_installations_include_the_picosha2_license_notice():
+    root = Path(__file__).parents[1]
+    makefile = (root / "Makefile").read_text(encoding="utf-8")
+    rpm = (root / "packaging" / "rpm" / "unroot.spec.in").read_text(
+        encoding="utf-8"
+    )
+    debian = (root / "packaging" / "debian" / "copyright").read_text(
+        encoding="utf-8"
+    )
+
+    notices = (root / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
+
+    assert "THIRD_PARTY_LICENSES.md" in makefile
+    assert "%license %{_docdir}/unroot/THIRD_PARTY_LICENSES.md" in rpm
+    assert "Files: third_party/picosha2/*" in debian
+    assert "Copyright: 2017 okdshin" in debian
+    assert "Copyright (c) 2017 okdshin" in notices
+    assert "Copyright (c) 2013-2023 Niels Lohmann" in notices

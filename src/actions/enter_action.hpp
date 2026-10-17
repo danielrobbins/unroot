@@ -1,6 +1,7 @@
 #pragma once
 #include "enter_config.hpp"
 #include "../linuxns.hpp"
+#include "../meta.hpp"
 #include "util/idmap.hpp"
 #include <memory>
 
@@ -17,11 +18,13 @@ public:
 private:
     // Helper methods for the enter execution flow
     static std::unique_ptr<EmuPlan> setupEmulation(
-        const EnterConfig& config, const util::IdMapPlan& idmap);
+        const EnterConfig& config, const util::IdMapPlan& idmap,
+        const meta::RootLayout& layout);
     static util::IdMapPlan resolveIdMap(const EnterConfig& config);
     static int executeNamespace(const EnterConfig& config,
                                 const std::unique_ptr<EmuPlan>& emuPlan,
-                                const util::IdMapPlan& idmap);
+                                const util::IdMapPlan& idmap,
+                                const meta::RootLayout& layout);
 };
 
 }

@@ -114,12 +114,15 @@ int InjectionAction::perform(const InjectionConfig& config) {
   if (!stored.error.empty()) fail("idmap: " + stored.error);
   if (!stored.found)
     fail("inject requires a managed rootfs created by unroot unpack");
+  auto resolvedLayout = meta::resolveRootLayout(pinnedRoot);
+  if (!resolvedLayout) fail("layout: " + resolvedLayout.error);
+  const auto& layout = resolvedLayout.layout;
 
   std::string error;
   if (config.operation == "list") {
     std::vector<injections::Entry> entries;
-    if (!injections::list(pinnedRoot.string(), entries, error)) fail(error);
-    displayList(pinnedRoot, entries, config.json);
+    if (!injections::list(layout, entries, error)) fail(error);
+    displayList(layout.effectiveRoot, entries, config.json);
     return 0;
   }
 
@@ -131,12 +134,12 @@ int InjectionAction::perform(const InjectionConfig& config) {
       if (!injections::parseSpec(value, spec, error)) fail(error);
       specs.push_back(std::move(spec));
     }
-    if (!injections::add(pinnedRoot.string(), idmap, std::move(specs), error))
+    if (!injections::add(layout, idmap, std::move(specs), error))
       fail(error);
   } else if (config.operation == "remove") {
-    if (!injections::remove(pinnedRoot.string(), idmap, config.items, error))
+    if (!injections::remove(layout, idmap, config.items, error))
       fail(error);
-  } else if (!injections::clear(pinnedRoot.string(), idmap, error)) {
+  } else if (!injections::clear(layout, idmap, error)) {
     fail(error);
   }
   return 0;

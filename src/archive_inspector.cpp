@@ -17,17 +17,21 @@ std::string trim(std::string text) {
   return first == std::string::npos ? std::string() : text.substr(first);
 }
 
-}  // namespace
-
-InspectionResult Inspector::inspect(const Input& input) const {
+InspectionResult inspectWithOptions(const Input& input,
+                                    const std::string& rootPrefix,
+                                    bool ociLayer) {
   UniqueFd descriptor = input.duplicateForChild();
   if (!descriptor) return {{}, "unable to prepare archive for inspection"};
   std::vector<std::string> arguments{
       "archive", "inspect", "--fd", std::to_string(descriptor.get())};
+  if (!rootPrefix.empty()) {
+    arguments.push_back("--root-prefix");
+    arguments.push_back(rootPrefix);
+  }
+  if (ociLayer) arguments.push_back("--oci-layer");
   util::ProgressOutput progress;
   progress.appendTo(arguments);
-  auto response =
-      util::runHostHelper(arguments, archiveinfo::ResponseLimit);
+  auto response = util::runHostHelper(arguments, archiveinfo::ResponseLimit);
   std::string output = trim(std::move(response.output));
   if (!response.error.empty()) return {{}, std::move(response.error)};
   if (response.truncated) return {{}, "oversized response from unroot-util"};
@@ -37,6 +41,17 @@ InspectionResult Inspector::inspect(const Input& input) const {
   auto parsed = archiveinfo::parseRecord(output);
   if (!parsed) return {{}, std::move(parsed.error)};
   return {std::move(parsed.report), {}};
+}
+
+}  // namespace
+
+InspectionResult Inspector::inspect(const Input& input,
+                                    const std::string& rootPrefix) const {
+  return inspectWithOptions(input, rootPrefix, false);
+}
+
+InspectionResult Inspector::inspectOciLayer(const Input& input) const {
+  return inspectWithOptions(input, {}, true);
 }
 
 }  // namespace archiveio

@@ -5,9 +5,11 @@
 #include "../meta.hpp"
 #include "../include/util/log_host.hpp"
 #include "../include/util/error_map.hpp"
+#include "../include/util/rootfs.hpp"
 #include "../app_exception.hpp"
 #include <iostream>
 #include <memory>
+#include <filesystem>
 #include <unistd.h>
 
 namespace actions {
@@ -15,12 +17,19 @@ namespace actions {
 int EnterAction::execute(const EnterConfig& config) {
     try {
         auto idmap = resolveIdMap(config);
+        auto resolvedLayout = meta::resolveRootLayout(config.root);
+        if (!resolvedLayout)
+            throw AppException(
+                util::make_error(util::LibErr::Invalid, 0,
+                                 "layout: " + resolvedLayout.error),
+                "enter");
 
         // Step 1: Setup emulation - critical for cross-architecture execution
-        auto emuPlan = setupEmulation(config, idmap);
+        auto emuPlan = setupEmulation(config, idmap, resolvedLayout.layout);
 
         // Step 2: Execute namespace with the persisted ID map
-        return executeNamespace(config, emuPlan, idmap);
+        return executeNamespace(config, emuPlan, idmap,
+                                resolvedLayout.layout);
         
     } catch (const AppException& e) {
         std::cerr << "Error: " << e.what() << std::endl;
@@ -73,9 +82,11 @@ util::IdMapPlan EnterAction::resolveIdMap(const EnterConfig& config) {
 
 // Helper method: Setup emulation following working reference implementation
 std::unique_ptr<EmuPlan> EnterAction::setupEmulation(
-    const EnterConfig& config, const util::IdMapPlan& idmap) {
+    const EnterConfig& config, const util::IdMapPlan& idmap,
+    const meta::RootLayout& layout) {
     // First analyze architecture to populate host/target arch fields
-    const_cast<EnterConfig&>(config).analyzeArchitecture();
+    const_cast<EnterConfig&>(config).analyzeArchitecture(
+        layout.effectiveRoot.string());
     
     // Log architecture information
     util::hostLogStep("arch:host", !config.hostArch.empty(), config.hostArch);
@@ -95,7 +106,8 @@ std::unique_ptr<EmuPlan> EnterAction::setupEmulation(
 
     emulation::Settings settings;
     settings.native = idmap.mode == util::IdMapMode::Native;
-    settings.root = config.root;
+    settings.root = layout.effectiveRoot.string();
+    settings.metadataRoot = layout.managedRoot.string();
     settings.executable = config.targetExecutable;
     settings.targetArch = config.targetArch;
     settings.hostArch = config.hostArch;
@@ -114,13 +126,23 @@ std::unique_ptr<EmuPlan> EnterAction::setupEmulation(
 // Helper method: Execute namespace with proper error handling
 int EnterAction::executeNamespace(const EnterConfig& config,
                                   const std::unique_ptr<EmuPlan>& emuPlan,
-                                  const util::IdMapPlan& idmap) {
+                                  const util::IdMapPlan& idmap,
+                                  const meta::RootLayout& layout) {
     NsResult r{};
     try {
         EmuPlan* emuPtr = (emuPlan && !emuPlan->source.empty()) ? emuPlan.get() : nullptr;
 
-        r = enterNamespace(config.root, config.shell, idmap, emuPtr,
-                           config.maps.empty() ? nullptr : &config.maps,
+        std::vector<BindMap> maps = config.maps;
+        if (layout.prefixed()) {
+            util::Rootfs effective(layout.effectiveRoot.string());
+            if (!effective || !effective.directory("/.unroot", true))
+                throw std::runtime_error(
+                    "unable to prepare the prefixed rootfs metadata mount");
+            maps.push_back({(layout.managedRoot / ".unroot").string(),
+                            "/.unroot", false});
+        }
+        r = enterNamespace(layout.effectiveRoot.string(), config.shell, idmap,
+                           emuPtr, maps.empty() ? nullptr : &maps,
                            config.envVars.empty() ? nullptr : &config.envVars,
                            config.cwdInRoot.empty() ? nullptr : &config.cwdInRoot);
     } catch (const std::system_error& se) {

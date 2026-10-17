@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "archive_substitution.hpp"
+#include "meta.hpp"
 #include "util/fd.hpp"
 #include "util/idmap.hpp"
 
@@ -48,14 +49,14 @@ bool parseUnpackExclusions(const std::string& value,
                            std::string& error);
 
 // Callers hold the managed rootfs operation lock across registry operations.
-bool list(const std::string& rootfs, std::vector<Entry>& entries,
+bool list(const meta::RootLayout& layout, std::vector<Entry>& entries,
           std::string& error);
-bool add(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool add(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
          std::vector<Spec> specs, std::string& error);
-bool remove(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool remove(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
             const std::vector<std::string>& targets, std::string& error);
-bool clear(const std::string& rootfs, const util::IdMapPlan& idmap,
+bool clear(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
            std::string& error);
-ArchivePlan archivePlan(const std::string& rootfs);
+ArchivePlan archivePlan(const meta::RootLayout& layout);
 
 }  // namespace injections

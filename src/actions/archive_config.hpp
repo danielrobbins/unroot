@@ -38,6 +38,9 @@ class UnpackConfig : public ActionConfig {
   unsigned int idCount = util::DefaultRichIdCount;
   bool idCountSpecified = false;
   std::vector<std::string> disabledInjections;
+  std::string rootPrefix;
+  bool flatten = false;
+  std::string platform;
 
   std::string getActionName() const override { return "unpack"; }
   void validate() const override;

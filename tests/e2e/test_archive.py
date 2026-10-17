@@ -136,6 +136,116 @@ def test_nested_oci_layout_name_remains_a_raw_rootfs_member(
     assert json.loads(result.stdout)["layout"]["oci"] is False
 
 
+@pytest.mark.parametrize("prefix", ["bundle/rootfs", "bundle[1]*/root?fs"])
+def test_prefixed_raw_archive_preserves_wrapper_and_enters_effective_root(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+    prefix: str,
+) -> None:
+    _require_fixture_tar()
+    busybox = find_static_busybox()
+    if busybox is None:
+        pytest.skip("a static BusyBox is required for prefixed-root coverage")
+    source = tmp_path / "source"
+    effective = create_rootfs(source / prefix, busybox)
+    (source / "description.txt").write_text(
+        "wrapper metadata\n", encoding="utf-8"
+    )
+    (effective / "payload").write_text("prefixed\n", encoding="utf-8")
+    for parent in (source, effective):
+        keys = parent / "etc/ssh"
+        keys.mkdir(parents=True, exist_ok=True)
+        (keys / "ssh_host_fixture").write_text("not a real key\n")
+    archive = tmp_path / "prefixed.tar"
+    _create_archive(source, archive)
+    root = tmp_path / "root"
+
+    try:
+        _run_unroot(
+            unroot,
+            [
+                "unpack", "--native", "--inject=-*", "--root-prefix",
+                prefix, str(archive), str(root),
+            ],
+            {},
+            privileged_prefix,
+        ).assert_ok()
+        metadata = json.loads(
+            _run_unroot(
+                unroot,
+                ["enter", "--native", str(root), "--", "/bin/busybox",
+                 "cat", "/.unroot/meta.json"],
+                {},
+                privileged_prefix,
+            ).assert_ok().stdout
+        )
+        assert metadata["layout"]["root_prefix"] == prefix
+        assert (root / "description.txt").read_text(
+            encoding="utf-8"
+        ) == "wrapper metadata\n"
+        entered = _run_unroot(
+            unroot,
+            ["enter", "--native", str(root), "--", "/bin/busybox",
+             "cat", "/payload"],
+            {},
+            privileged_prefix,
+        ).assert_ok()
+        assert entered.stdout == "prefixed\n"
+        injected = tmp_path / "injected"
+        injected.write_text("host content\n")
+        _run_unroot(
+            unroot, ["inject", "add", str(root), f"{injected}:/payload"],
+            {}, privileged_prefix,
+        ).assert_ok()
+        assert (root / prefix / "payload").read_text() == "host content\n"
+
+        captured = tmp_path / "captured.tar"
+        _run_unroot(
+            unroot, ["pack", str(root), str(captured)], {}, privileged_prefix
+        ).assert_ok()
+        with tarfile.open(captured) as packed:
+            members = {member.name.removeprefix("./"): member for member in packed}
+            names = set(members)
+            assert packed.extractfile(members[f"{prefix}/payload"]).read() == b"prefixed\n"
+        assert "description.txt" in names
+        assert "etc/ssh/ssh_host_fixture" in names
+        assert f"{prefix}/etc/ssh/ssh_host_fixture" not in names
+        assert (root / prefix / "etc/ssh/ssh_host_fixture").is_file()
+        assert (root / prefix / "payload").read_text() == "host content\n"
+        assert not any(
+            name == ".unroot" or name.startswith(".unroot/") or
+            name == f"{prefix}/.unroot" or
+            name.startswith(f"{prefix}/.unroot/")
+            for name in names
+        )
+    finally:
+        if root.exists() and os.geteuid() != 0:
+            run_command([*privileged_prefix, "rm", "-rf", str(root)])
+
+
+def test_unpack_rejects_a_missing_root_prefix_before_extraction(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    privileged_prefix: tuple[str, ...],
+) -> None:
+    archive = tmp_path / "raw.tar"
+    _create_named_archive(archive, "other/payload", b"ordinary file\n")
+    root = tmp_path / "root"
+
+    result = _run_unroot(
+        unroot,
+        ["unpack", "--native", "--root-prefix", "bundle/rootfs",
+         str(archive), str(root)],
+        {},
+        privileged_prefix,
+    )
+
+    assert result.returncode != 0, result.diagnostic()
+    assert "archive does not contain root prefix" in result.stderr
+    assert not root.exists()
+
+
 @pytest.mark.parametrize("member", ["../outside", "a/../../outside", "/outside"])
 def test_unpack_rejects_member_paths_outside_the_rootfs(
     unroot: UnrootRunner,

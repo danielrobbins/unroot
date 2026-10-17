@@ -221,8 +221,10 @@ void EnterConfig::validateNamespace() const {
     
 }
 
-void EnterConfig::analyzeArchitecture() {
+void EnterConfig::analyzeArchitecture(const std::string& effectiveRoot) {
     hostArch = detectHostArch();
+    const std::string& executionRoot =
+        effectiveRoot.empty() ? root : effectiveRoot;
 
     targetExecutable = shell.empty() ? "/bin/sh" : shell[0];
     if (!targetExecutable.empty() && targetExecutable[0] != '/') {
@@ -241,11 +243,11 @@ void EnterConfig::analyzeArchitecture() {
             path = item->second;
         }
         targetExecutable = util::resolveExecInRoot(
-            root, cwdInRoot, targetExecutable, path);
+            executionRoot, cwdInRoot, targetExecutable, path);
     }
     auto inspect = [&](std::string& executable) {
-        executable = resolveExecutableImage(root, executable);
-        ElfInfo target = readElfInfoAtRoot(root, executable);
+        executable = resolveExecutableImage(executionRoot, executable);
+        ElfInfo target = readElfInfoAtRoot(executionRoot, executable);
         if (target.valid && target.archName.empty()) {
             throw AppException(
                 util::make_error(

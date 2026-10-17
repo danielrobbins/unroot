@@ -23,32 +23,39 @@ pytestmark = [
 
 
 @pytest.mark.parametrize("role", ["NATIVE", "FOREIGN"], ids=["native", "foreign"])
+@pytest.mark.parametrize("archive_format", ["raw", "oci"])
 def test_alpine_rootfs_can_be_unpacked_entered_modified_packed_and_restored(
     role: str,
+    archive_format: str,
     unroot: UnrootRunner,
     tmp_path: Path,
     require_capability: Callable[[bool, str, Optional[str]], None],
 ) -> None:
-    archive_value = os.environ.get(f"UNROOT_E2E_ALPINE_{role}", "")
+    prefix = "OCI" if archive_format == "oci" else "ALPINE"
+    capability = "oci_journey" if archive_format == "oci" else "rootfs_journey"
+    archive_value = os.environ.get(f"UNROOT_E2E_{prefix}_{role}", "")
     expected_arch = os.environ.get(f"UNROOT_E2E_ALPINE_{role}_ARCH", "")
     archive = Path(archive_value) if archive_value else Path()
     require_capability(
         bool(archive_value) and archive.is_file() and bool(expected_arch),
         f"{role.lower()} rootfs archive and architecture are not configured",
-        "rootfs_journey",
+        capability,
     )
     require_capability(
         rich_idmap_available(unroot),
         "the real-rootfs journey requires rich ID mapping",
-        "rootfs_journey",
+        capability,
     )
 
     root = tmp_path / "root"
-    unroot.run("unpack", str(archive), str(root), timeout=90).assert_ok()
+    import_options = ("--flatten",) if archive_format == "oci" else ()
+    unroot.run("unpack", *import_options, str(archive), str(root), timeout=90).assert_ok()
     metadata = json.loads(
         (root / ".unroot" / "meta.json").read_text(encoding="utf-8")
     )
     assert metadata["idmap"]["mode"] == "rich"
+    if archive_format == "oci":
+        assert metadata["oci"]["mode"] == "flattened"
 
     marker = root / "root" / "unroot-journey"
     entered = unroot.run(

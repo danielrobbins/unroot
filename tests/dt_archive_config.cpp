@@ -138,6 +138,55 @@ TEST_CASE("unpack accepts explicit metadata-loss override") {
   CHECK(config.force);
 }
 
+TEST_CASE("unpack accepts a normalized root prefix") {
+  ToBeParsedArgs args;
+  args.action_name = "unpack";
+  args.args = {"input.tar", "root", "--root-prefix", "bundle/rootfs"};
+  UnpackConfig config;
+  config.parse(args);
+  CHECK(config.rootPrefix == "bundle/rootfs");
+}
+
+TEST_CASE("unpack accepts explicit OCI flattening and platform selection") {
+  ToBeParsedArgs args;
+  args.action_name = "unpack";
+  args.args = {"image.tar", "root", "--flatten", "--platform",
+               "linux/arm64/v8"};
+  UnpackConfig config;
+  config.parse(args);
+  CHECK(config.flatten);
+  CHECK(config.platform == "linux/arm64/v8");
+}
+
+TEST_CASE("unpack rejects unsafe root prefixes") {
+  TempArchive archive;
+  for (const std::string value : {"/rootfs", ".", "..", "a/../b",
+                                  "a//b", "a/./b", "rootfs/"}) {
+    ToBeParsedArgs args;
+    args.action_name = "unpack";
+    args.args = {archive.path.string(), "root", "--root-prefix", value};
+    UnpackConfig config;
+    config.parse(args);
+    REQUIRE_THROWS_AS(config.validate(), AppException);
+  }
+}
+
+TEST_CASE("unpack keeps OCI flattening separate from raw archive options") {
+  TempArchive archive;
+  for (const auto& arguments :
+       std::vector<std::vector<std::string>>{
+           {archive.path.string(), "root", "--flatten", "--root-prefix",
+            "bundle/rootfs"},
+           {archive.path.string(), "root", "--platform", "linux/amd64"}}) {
+    ToBeParsedArgs args;
+    args.action_name = "unpack";
+    args.args = arguments;
+    UnpackConfig config;
+    config.parse(args);
+    REQUIRE_THROWS_AS(config.validate(), AppException);
+  }
+}
+
 TEST_CASE("unpack accepts subtractive default injection controls") {
   ToBeParsedArgs args;
   args.action_name = "unpack";

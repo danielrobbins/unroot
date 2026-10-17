@@ -23,6 +23,15 @@ class Backend {
   int extract(const std::filesystem::path& root,
               const util::IdMapPlan& idmap,
               const archiveio::Input& input, bool force) const;
+  int applyLayer(const std::filesystem::path& root,
+                 const util::IdMapPlan& idmap,
+                 const archiveio::Input& input, bool force) const;
+  bool stageOci(const archiveio::Input& input,
+                const std::filesystem::path& destination,
+                std::string& error) const;
+  bool decompressLayer(const archiveio::Input& input, int outputDescriptor,
+                       const std::string& expectedFilter,
+                       std::string& error) const;
 
  private:
   std::string helper_;

@@ -98,10 +98,22 @@ def argument_rootfs(tmp_path, require_capability):
     return root
 
 
+@pytest.mark.parametrize("prefixed", [False, True])
 @pytest.mark.parametrize("name", ["probe", "-login", "custom name", ""])
-def test_foreign_program_preserves_callers_arguments(unroot, argument_rootfs, name):
+def test_foreign_program_preserves_callers_arguments(unroot, argument_rootfs, name, prefixed):
+    root = argument_rootfs
+    if prefixed:
+        wrapper = argument_rootfs.parent / "wrapper"
+        wrapper.mkdir()
+        argument_rootfs.rename(wrapper / "rootfs")
+        archive = argument_rootfs.parent / "wrapped.tar"
+        unroot.run("pack", "--single", str(wrapper), str(archive)).assert_ok()
+        root = argument_rootfs.parent / "managed"
+        unroot.run("unpack", "--inject=-*", "--root-prefix", "rootfs",
+                   str(archive), str(root)).assert_ok()
     result = unroot.run(
-        "enter", "--single", str(argument_rootfs), "--emulation-for", "/bin/probe",
+        "enter", *(("--single",) if not prefixed else ()), str(root),
+        "--emulation-for", "/bin/probe",
         "--", "/bin/launcher", "--exec", "/bin/probe", name,
         "first", "", "two words", "--last", timeout=90,
     )
