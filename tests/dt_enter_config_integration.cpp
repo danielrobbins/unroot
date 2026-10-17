@@ -2,6 +2,7 @@
 #include "actions/enter_config.hpp"
 #include "actions/parsed_args.hpp"
 #include "app_exception.hpp"
+#include "arch.hpp"
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -248,4 +249,69 @@ TEST_CASE("EnterConfig resolves bare and relative commands before probing ELF") 
     CHECK(relative.targetExecutable == "/work/probe");
     CHECK(relative.targetArch == "arm64");
     std::filesystem::remove_all(root);
+}
+
+TEST_CASE("EnterConfig can prepare foreign children without changing the command") {
+    auto root = std::filesystem::temp_directory_path() /
+        ("unroot-child-probe-" + std::to_string(static_cast<long long>(::getpid())));
+    std::filesystem::create_directories(root / "bin");
+    std::filesystem::copy_file("/proc/self/exe", root / "bin/native",
+        std::filesystem::copy_options::overwrite_existing);
+    const std::string host = detectHostArch();
+    const int machine = host == "arm64" ? 62 : 183;
+    const std::string foreign = host == "arm64" ? "x86_64" : "arm64";
+    std::array<unsigned char, 64> header{};
+    header[0] = 0x7f; header[1] = 'E'; header[2] = 'L'; header[3] = 'F';
+    header[4] = 2; header[5] = 1; header[18] = machine;
+    {
+        std::ofstream out(root / "bin/foreign", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(header.data()), header.size());
+    }
+    {
+        std::ofstream out(root / "bin/script");
+        out << "#!/bin/foreign\n";
+    }
+    std::filesystem::create_symlink("/bin/foreign", root / "bin/link");
+
+    EnterConfig cfg;
+    cfg.root = root.string();
+    cfg.shell = {"/bin/native", "unchanged"};
+    cfg.analyzeArchitecture();
+    CHECK_FALSE(cfg.isCrossArch);
+    for (const auto& reference : {"/bin/foreign", "/bin/script", "/bin/link"}) {
+        cfg.emulationFor = reference;
+        cfg.analyzeArchitecture();
+        CHECK(cfg.isCrossArch);
+        CHECK(cfg.targetArch == foreign);
+        CHECK((cfg.targetExecutable == "/bin/foreign" || cfg.targetExecutable == "/bin/link"));
+        CHECK((cfg.shell == std::vector<std::string>{"/bin/native", "unchanged"}));
+    }
+    cfg.shell = {"/bin/foreign"};
+    cfg.emulationFor = "/bin/native";
+    cfg.analyzeArchitecture();
+    CHECK(cfg.isCrossArch);
+    CHECK(cfg.targetExecutable == "/bin/foreign");
+    cfg.emulationFor = "/bin/foreign";
+    cfg.analyzeArchitecture();
+    cfg.emulationFor = "/bin/missing";
+    REQUIRE_THROWS_AS(cfg.analyzeArchitecture(), AppException);
+
+    header[18] = host == "riscv64" ? 62 : 243;
+    {
+        std::ofstream out(root / "bin/other", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(header.data()), header.size());
+    }
+    cfg.emulationFor = "/bin/other";
+    REQUIRE_THROWS_AS(cfg.analyzeArchitecture(), AppException);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("EnterConfig requires an absolute emulation reference") {
+    EnterConfig cfg;
+    ToBeParsedArgs args;
+    args.args = {"/rootfs", "--emulation-for", "bin/sh", "--", "/bin/native"};
+    REQUIRE_THROWS_AS(cfg.parse(args), AppException);
+    args.args[2] = "/bin/sh";
+    cfg.parse(args);
+    CHECK(cfg.emulationFor == "/bin/sh");
 }

@@ -125,6 +125,30 @@ def test_foreign_shebang_execution(
     assert result.stdout.strip() == expected
 
 
+def test_native_shell_can_launch_foreign_children(
+    unroot: UnrootRunner,
+    managed_rootfs: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    rootfs = managed_rootfs
+    program, expected, _ = _foreign_program(rootfs, require_capability)
+    reference = "/bin/" + program.name
+    child = shlex.join([reference, *shlex.split(os.environ.get("FOREIGN_ARGS", ""))])
+    for _ in range(2):
+        result = unroot.run(
+            "enter", str(rootfs), "--emulation-for", reference, "--",
+            "/bin/sh", "-c", f"printf 'native-parent\\n'; {child}", timeout=90,
+        )
+        result.assert_ok()
+        assert result.stdout.strip() == "native-parent\n" + expected
+    refused = unroot.run(
+        "enter", str(rootfs), "--emulation-for", reference,
+        "--emulation", "never", "--", "/bin/sh", "-c", child,
+    )
+    assert refused.returncode != 0, refused.diagnostic()
+    assert "requires emulation" in refused.stderr
+
+
 def test_unmanaged_foreign_root_can_be_entered_repeatedly(
     unroot: UnrootRunner,
     tmp_path: Path,

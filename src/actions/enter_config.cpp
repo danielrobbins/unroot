@@ -45,6 +45,15 @@ void EnterConfig::configure_parser() {
                 util::LibErr::Invalid, 0,
                 "--emulation expects 'auto' or 'never'"), "usage");
         })
+        .add_option_meta({"--emulation-for"}, "<path>",
+        "Also prepare emulation for this program inside ROOT",
+        [this](const std::string& value) {
+            if (value.empty() || value.front() != '/')
+                throw AppException(util::make_error(
+                    util::LibErr::Invalid, 0,
+                    "--emulation-for requires an absolute path inside ROOT"), "usage");
+            emulationFor = value;
+        })
         .add_option_meta({"--qemu"}, "<path>",
         "Use this static QEMU user-mode emulator",
         [this](const std::string& value) { qemu = value; })
@@ -234,9 +243,9 @@ void EnterConfig::analyzeArchitecture() {
         targetExecutable = util::resolveExecInRoot(
             root, cwdInRoot, targetExecutable, path);
     }
-    if (!targetExecutable.empty()) {
-        targetExecutable = resolveExecutableImage(root, targetExecutable);
-        ElfInfo target = readElfInfoAtRoot(root, targetExecutable);
+    auto inspect = [&](std::string& executable) {
+        executable = resolveExecutableImage(root, executable);
+        ElfInfo target = readElfInfoAtRoot(root, executable);
         if (target.valid && target.archName.empty()) {
             throw AppException(
                 util::make_error(
@@ -247,7 +256,27 @@ void EnterConfig::analyzeArchitecture() {
                         elfDataToString(target.ei_data)),
                 "enter");
         }
-        targetArch = target.archName;
+        return target.archName;
+    };
+    targetArch = inspect(targetExecutable);
+    if (!emulationFor.empty()) {
+        std::string reference = emulationFor;
+        std::string referenceArch = inspect(reference);
+        if (referenceArch.empty())
+            throw AppException(util::make_error(
+                util::LibErr::Invalid, 0,
+                "--emulation-for must resolve to a supported ELF program inside ROOT: " +
+                    emulationFor), "enter");
+        if (referenceArch != hostArch) {
+            if (!targetArch.empty() && targetArch != hostArch &&
+                targetArch != referenceArch)
+                throw AppException(util::make_error(
+                    util::LibErr::Invalid, 0,
+                    "the initial command and --emulation-for require two different "
+                    "foreign architectures; only one is supported per entry"), "enter");
+            targetExecutable = std::move(reference);
+            targetArch = std::move(referenceArch);
+        }
     }
     
     isCrossArch = (!targetArch.empty() && !hostArch.empty() && targetArch != hostArch);

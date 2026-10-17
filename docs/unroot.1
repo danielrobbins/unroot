@@ -311,6 +311,11 @@ Disable one or more default injections during \fBunpack\fR\&. Accepts \fB\-hosts
 \fB\-\-emulation MODE\fR
 Set the foreign\-execution policy. \fBauto\fR, the default, uses a static QEMU user\-mode emulator when the target ELF architecture differs from the host. \fBnever\fR rejects a foreign target instead.
 .TP
+\fB\-\-emulation\-for PATH\fR
+Also prepare emulation for the architecture of a program at an absolute path inside \fIROOT\fR\&. This is useful when a host\-executable build tool starts foreign\-architecture child programs: for example, \fB\-\-emulation\-for /bin/sh\fR allows an x86\-64 Bash to launch ARM64 programs in an ARM64 root. The reference program is inspected, including its script interpreter, but is not executed or substituted for the requested command. It must resolve to a supported ELF image. This does not copy host libraries, replace target programs, or change ownership policy.
+.PP
+Unroot still checks the initial command. A host\-architecture reference cannot disable emulation needed by that command. Requests requiring two different foreign architectures are rejected; one foreign architecture is supported per entry. \fB\-\-emulation never\fR still rejects any required foreign execution. Without this option, only the initial command determines automatic emulation setup.
+.TP
 \fB\-\-qemu PATH\fR
 Use the specified static QEMU user\-mode emulator for foreign execution. Rich mode may use an executable path or a name on the host \fBPATH\fR\&. Native mode requires a trusted root\-owned system path. The emulator itself must be executable by the host architecture.
 .TP

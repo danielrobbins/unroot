@@ -341,6 +341,18 @@
         "priority": "70"
       }
     },
+    "option:enter.emulation-for": {
+      "kind": "option",
+      "name": "enter.emulation-for",
+      "title": "--emulation-for PATH",
+      "short_help": "--emulation-for PATH",
+      "syntax": "--emulation-for PATH",
+      "description": "Also prepare emulation for the architecture of a program at an absolute path inside *ROOT*. This is useful when a host-executable build tool starts foreign-architecture child programs: for example, `--emulation-for /bin/sh` allows an x86-64 Bash to launch ARM64 programs in an ARM64 root. The reference program is inspected, including its script interpreter, but is not executed or substituted for the requested command. It must resolve to a supported ELF image. This does not copy host libraries, replace target programs, or change ownership policy.\n\nUnroot still checks the initial command. A host-architecture reference cannot disable emulation needed by that command. Requests requiring two different foreign architectures are rejected; one foreign architecture is supported per entry. `--emulation never` still rejects any required foreign execution. Without this option, only the initial command determines automatic emulation setup.",
+      "metadata": {
+        "parent": "section:options",
+        "priority": "75"
+      }
+    },
     "option:enter.qemu": {
       "kind": "option",
       "name": "enter.qemu",
@@ -728,6 +740,10 @@
         },
         {
           "tag": "option:enter.emulation",
+          "children": []
+        },
+        {
+          "tag": "option:enter.emulation-for",
           "children": []
         },
         {
