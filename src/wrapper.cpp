@@ -18,6 +18,11 @@
 using util::hostLogStep;
 
 [[noreturn]] void runWrapper(int argc, char** argv) {
+  // binfmt_misc P supplies: wrapper, executable, original argv[0], arguments.
+  if (argc < 3) {
+    std::fprintf(stderr, "[wrapper] missing executable or original program name\n");
+    _exit(127);
+  }
   std::string emuBinStr;
   std::vector<std::string> emuArgs;
   // Read /.unroot/meta.json for qemuWrapper settings (env-based config deprecated)
@@ -42,16 +47,12 @@ using util::hostLogStep;
   std::vector<const char*> newv; newv.reserve((size_t)argc + emuArgs.size() + 8);
   newv.push_back(emuBin); // argv[0] = emulator
   for (const auto& argument : emuArgs) newv.push_back(argument.c_str());
+  newv.push_back("-0");
+  newv.push_back(argv[2]);
   bool haveFd255 = (fcntl(255, F_GETFD) != -1);
   if (::getenv("UNROOT_QEMU_NOFD255")) haveFd255 = false;
-  if (haveFd255) {
-    if (argc >= 2) { newv.push_back("-0"); newv.push_back(argv[1]); }
-    newv.push_back("/proc/self/fd/255");
-    for (int i=2;i<argc;i++) newv.push_back(argv[i]);
-  } else {
-    if (argc >= 2) newv.push_back(argv[1]);
-    for (int i=2;i<argc;i++) newv.push_back(argv[i]);
-  }
+  newv.push_back(haveFd255 ? "/proc/self/fd/255" : argv[1]);
+  for (int i=3;i<argc;i++) newv.push_back(argv[i]);
   newv.push_back(nullptr);
   if (debug) {
     std::fprintf(stderr, "[wrapper] emu=%s fd255=%d\n", emuBin, haveFd255?1:0);

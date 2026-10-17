@@ -170,7 +170,7 @@ EmuPlan Manager::prepare() {
                 std::filesystem::path(source).filename().string();
   plan.registration = binfmtRegistration(
       "unroot-" + settings_.targetArch, "/.unroot/bin/wrapper", magic, mask,
-      "FOC");
+      "FOCP");
 
   std::vector<std::string> arguments;
   if (!settings_.cpu.empty()) arguments = {"-cpu", settings_.cpu};
