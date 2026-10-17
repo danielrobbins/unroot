@@ -1,3 +1,18 @@
+# Unroot 1.0.6
+
+**Features and Bug Fixes** -- October 17, 2026.
+
+Unroot 1.0.6 adds new ways to import and export root filesystems, a new "exclude" framework for excluding SSH host keys and other files from Unroot archives, and key bug fixes that make foreign-architecture builds more reliable. These improvements were exercised during real FFS bootstraps.
+
+- OCI image-layout archives can now be imported with `unpack --flatten`. Unroot verifies image contents and combines the layers into a normal rootfs, which you can enter, modify, and pack. This is a one-way import: packing produces a regular rootfs archive, not an OCI image. `--platform` selects the image when needed.
+- Archives with a rootfs inside a wrapper directory are supported through `unpack --root-prefix PATH`. Entry, emulation, injections, and exclusions use that root, while packing preserves the complete archive layout.
+- `pack --single` completes the workflow for single-owner roots built using `enter --single`. It records the invoking user's UID and GID as root in the archive, without changing ownership on disk or requiring subordinate IDs. It refuses ownership that this mapping cannot represent and cannot override a managed root's recorded mapping.
+- New "exclude" framework, similar to "inject" framework -- lets you omit build directories or sensitive files without deleting them from the working root. Manage these with `unroot exclude add`, `list`, `remove`, and `clear`. Newly unpacked roots exclude SSH host keys (`/etc/ssh/ssh_host_*`, including their public keys) from subsequent archives by default. The files remain in the working root, and existing roots are unchanged.
+- Re-entering an unmanaged foreign-architecture root could fail because Unroot mistook its saved emulator information for a recorded ownership mapping. Unroot now distinguishes the two, allowing repeated entry without weakening ownership checks. The new `enter --emulation-for PATH` option also lets a host-native tool launch foreign-architecture programs, supporting accelerated compilers and shells inside the target root.
+- Programs running through QEMU could receive the wrong program name or inherit an unexpected open file descriptor, causing failures in build-tool tests. Unroot now preserves the caller's program name and arguments and closes the executable descriptor supplied by the kernel before starting QEMU, while preserving the caller's own descriptors.
+
+Regression coverage includes single-owner packing, archive exclusions, prefixed roots, and real x86-64 and ARM64 OCI images imported, entered, modified, packed, and restored without host root privileges.
+
 # Unroot 1.0.5
 
 **Bug Fix Release** -- August 15, 2026.
