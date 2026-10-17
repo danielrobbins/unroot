@@ -11,7 +11,7 @@ from typing import Callable, Optional, Tuple
 
 import pytest
 
-from .support import UnrootRunner, run_command
+from .support import UnrootRunner, create_rootfs, run_command
 
 
 pytestmark = [
@@ -123,6 +123,26 @@ def test_foreign_shebang_execution(
         f"foreign shebang fixture using {source} failed\n{result.diagnostic()}"
     )
     assert result.stdout.strip() == expected
+
+
+def test_unmanaged_foreign_root_can_be_entered_repeatedly(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    root = create_rootfs(tmp_path / "unmanaged")
+    program, expected, _ = _foreign_program(root, require_capability)
+    arguments = shlex.split(os.environ.get("FOREIGN_ARGS", ""))
+    for _ in range(2):
+        result = run_command([
+            str(unroot.binary), "enter", "--single", str(root),
+            "--", "/bin/" + program.name, *arguments,
+        ], timeout=90)
+        result.assert_ok()
+        assert result.stdout.strip() == expected
+    metadata = json.loads((root / ".unroot" / "meta.json").read_text())
+    assert "qemuWrapper" in metadata
+    assert "idmap" not in metadata
 
 
 def test_foreign_execution_can_be_disabled(
