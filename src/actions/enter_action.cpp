@@ -5,7 +5,6 @@
 #include "../meta.hpp"
 #include "../include/util/log_host.hpp"
 #include "../include/util/error_map.hpp"
-#include "../include/util/rootfs.hpp"
 #include "../app_exception.hpp"
 #include <iostream>
 #include <memory>
@@ -134,10 +133,7 @@ int EnterAction::executeNamespace(const EnterConfig& config,
 
         std::vector<BindMap> maps = config.maps;
         if (layout.prefixed()) {
-            util::Rootfs effective(layout.effectiveRoot.string());
-            if (!effective || !effective.directory("/.unroot", true))
-                throw std::runtime_error(
-                    "unable to prepare the prefixed rootfs metadata mount");
+            // Mount setup creates the target after ID mapping, including on 0555 roots.
             maps.push_back({(layout.managedRoot / ".unroot").string(),
                             "/.unroot", false});
         }

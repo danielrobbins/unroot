@@ -136,6 +136,32 @@ def test_nested_oci_layout_name_remains_a_raw_rootfs_member(
     assert json.loads(result.stdout)["layout"]["oci"] is False
 
 
+@pytest.mark.parametrize("root_mode", [0o555, 0o755])
+def test_prefixed_root_entry_preserves_directory_permissions(
+    unroot: UnrootRunner, managed_rootfs: Path, tmp_path: Path, root_mode: int,
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("requires an unprivileged caller to reproduce host permission denial")
+    source = tmp_path / "bundle"
+    source.mkdir()
+    effective = source / "rootfs"
+    shutil.copytree(managed_rootfs, effective, ignore=shutil.ignore_patterns(".unroot"))
+    effective.chmod(root_mode)
+    archive = tmp_path / "bundle.tar"
+    _create_archive(source, archive)
+    root = tmp_path / "prefixed"
+    unroot.run("unpack", "--root-prefix", "rootfs", str(archive), str(root)).assert_ok()
+    for _ in range(2):
+        unroot.run("enter", str(root), "--", "/bin/busybox", "true").assert_ok()
+        assert stat.S_IMODE((root / "rootfs").stat().st_mode) == root_mode
+    captured = tmp_path / "captured.tar"
+    unroot.run("pack", str(root), str(captured)).assert_ok()
+    with tarfile.open(captured) as packed:
+        members = {m.name.removeprefix("./").rstrip("/"): m for m in packed}
+        assert members["rootfs"].mode == root_mode
+        assert not any(name.startswith("rootfs/.unroot") for name in members)
+
+
 @pytest.mark.parametrize("prefix", ["bundle/rootfs", "bundle[1]*/root?fs"])
 def test_prefixed_raw_archive_preserves_wrapper_and_enters_effective_root(
     unroot: UnrootRunner,
