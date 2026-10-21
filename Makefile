@@ -601,7 +601,7 @@ LLVM_PROFDATA ?= llvm-profdata
 # (Removed legacy Catch2 harness variables and targets.)
 
 ## Doctest harness build (all doctest-based unit tests)
-DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp tests/injection_action_stub.cpp
+DOCTEST_TEST_SRCS := tests/doctest_main.cpp $(wildcard tests/dt_*.cpp) tests/enter_action_stub.cpp tests/archive_action_stub.cpp tests/injection_action_stub.cpp tests/enter_namespace_stub.cpp
 DOCTEST_HARNESS_SRCS := \
 	src/archive_report.cpp \
 	src/filesystem_caps.cpp \
