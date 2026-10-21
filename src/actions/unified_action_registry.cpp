@@ -169,28 +169,6 @@ Action ActionRegistry::get_action(const std::string& name) {
     return it->second;
 }
 
-std::vector<Action> ActionRegistry::get_sub_actions(const std::string& container) {
-    std::vector<Action> sub_actions;
-    auto sub_names = find_sub_actions(container);
-    
-    for (const auto& name : sub_names) {
-        if (has_action(name)) {
-            sub_actions.push_back(get_action(name));
-        }
-    }
-    
-    return sub_actions;
-}
-
-std::vector<std::string> ActionRegistry::list_actions() {
-    std::vector<std::string> actions;
-    for (const auto& pair : get_registry()) {
-        actions.push_back(pair.first);
-    }
-    std::sort(actions.begin(), actions.end());
-    return actions;
-}
-
 int ActionRegistry::execute(const std::string& name, const ToBeParsedArgs& args) {
     if (!has_action(name)) {
         throw std::runtime_error("Action '" + name + "' not found");
