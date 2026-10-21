@@ -1208,3 +1208,25 @@ def test_binfmt_mount_is_private_and_writable(
         "private_binfmt",
     )
     assert probe.stdout.startswith("private-binfmt-ok:")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any metadata file")
+def test_unreadable_ownership_metadata_is_not_reported_as_unmanaged(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    root = create_rootfs(tmp_path / "root")
+    metadata = root / ".unroot" / "meta.json"
+    metadata.parent.mkdir()
+    metadata.write_text('{"idmap": {"mode": "native"}}', encoding="utf-8")
+    metadata.chmod(0)
+
+    try:
+        entered = unroot.run("enter", str(root), "--", "/bin/true")
+        single = unroot.run("enter", "--single", str(root), "--", "/bin/true")
+    finally:
+        metadata.chmod(0o600)
+
+    for result in (entered, single):
+        assert result.returncode != 0, result.diagnostic()
+        assert "not readable" in result.stderr, result.diagnostic()
+        assert "no Unroot ownership metadata" not in result.stderr, result.diagnostic()

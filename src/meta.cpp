@@ -200,8 +200,17 @@ nlohmann::json loadMetaJson(const fs::path& rootfs) {
 }
 
 IdMapMetaResult readIdMap(const fs::path& rootfs) {
-  auto [available, content] = readMeta(rootfs);
-  return available ? parseIdMapMeta(content) : IdMapMetaResult{};
+  util::Rootfs root(rootfs.string());
+  std::string content;
+  if (!root) return {};
+  if (root.readText(MetaPath, content)) return parseIdMapMeta(content);
+  // Metadata that exists but cannot be read (for example a native root owned
+  // by another user) is not the same as an unmanaged root.
+  if (errno == EACCES || errno == EPERM)
+    return {false, false, {},
+            "rootfs ownership metadata is not readable by this user; a root "
+            "owned by another user needs sudo"};
+  return {};
 }
 
 IdMapMetaResult initializeIdMap(const fs::path& rootfs,
