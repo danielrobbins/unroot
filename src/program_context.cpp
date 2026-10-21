@@ -4,13 +4,10 @@
 namespace program {
 
 std::string Context::program_name_;
-std::string Context::program_path_;
 bool Context::initialized_ = false;
 
 void Context::initialize(const char* argv0) {
     if (initialized_) return;
-    
-    program_path_ = std::filesystem::absolute(argv0).string();
     
     // Extract just the program name (handle symlinks intelligently)
     std::filesystem::path p(argv0);
@@ -34,14 +31,6 @@ const std::string& Context::program_name() {
         return fallback;
     }
     return program_name_;
-}
-
-const std::string& Context::program_path() {
-    if (!initialized_) {
-        static std::string fallback = "unroot";
-        return fallback;
-    }
-    return program_path_;
 }
 
 } // namespace program

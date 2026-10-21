@@ -328,26 +328,6 @@ void OptionParser::parseShortCluster(const std::string& token, size_t& i, const 
     }
 }
 
-std::string OptionParser::generateUsagePattern(const std::string& action_name) const {
-    std::string pattern = action_name;
-    
-    // Add options placeholder
-    if (!meta_.empty()) {
-        pattern += " [OPTIONS]";
-    }
-    
-    // Add positional arguments
-    for (const auto& pos : positional_meta_) {
-        if (pos.required) {
-            pattern += " " + pos.name;
-        } else {
-            pattern += " [" + pos.name + "]";
-        }
-    }
-    
-    return pattern;
-}
-
 std::vector<Option> OptionParser::exportOptions() const {
     std::vector<Option> out;
     for (const auto& m : meta_) {

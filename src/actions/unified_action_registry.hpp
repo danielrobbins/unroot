@@ -64,8 +64,6 @@ public:
     // Simple queries
     static bool has_action(const std::string& name);
     static Action get_action(const std::string& name);
-    static std::vector<Action> get_sub_actions(const std::string& container);
-    static std::vector<std::string> list_actions();
     
     // Execution
     static int execute(const std::string& name, const ToBeParsedArgs& args);

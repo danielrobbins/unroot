@@ -50,7 +50,6 @@ public:
     // --- Core Methods ---
     ParseResult parse(const std::vector<std::string>& argv) const;
     std::vector<Option> exportOptions() const;
-    std::string generateUsagePattern(const std::string& action_name) const;
 
     // Enable acceptance of trailing arguments (either via extras beyond declared
     // positional_meta_ or explicitly after a "--"). Default is disabled; when
