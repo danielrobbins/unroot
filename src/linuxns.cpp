@@ -732,7 +732,7 @@ static NsResult decodeChildStatus(int status, int setupErrno = 0) {
     case 104: return {4, namespacePolicyDiagnostic(
         "failed to set MS_PRIVATE", setupErrno)};
     case 105: return {11, "chroot/chdir failed"};
-    case 106: return {12, "exec failed"};
+    case 106: return {12, "exec failed (command not found or not executable in the root)"};
     case 107: return {13, "user bind map failed"};
     case 108: return {26, "pidns fork failed"};
     case 109: return {27, "target fork failed"};

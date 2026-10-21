@@ -68,7 +68,8 @@ EmuPlan Manager::prepare() {
     if (!settings_.qemu.empty() || !settings_.cpu.empty()) {
       throw AppException(
           util::make_error(util::LibErr::Invalid, 0,
-                           "cannot apply QEMU options without a recognized target ELF"),
+                           "cannot apply QEMU options: the target command was not found in the root "
+                           "or is not a recognized ELF executable"),
           "usage");
     }
     return {};
@@ -114,14 +115,15 @@ EmuPlan Manager::prepare() {
     source = util::findOnPath(emulator + "-static");
   if (!settings_.native && source.empty()) source = util::findOnPath(emulator);
   if (source.empty() || !isStaticElf(source)) {
-    std::string requested = settings_.qemu.empty() ? emulator + "-static"
-                                                   : emulator;
+    std::string requested = settings_.qemu.empty()
+                                ? "'" + emulator + "-static' or '" + emulator + "'"
+                                : "'" + emulator + "'";
     throw AppException(
         util::make_error(util::LibErr::NotFound, 0,
-                         "static QEMU user emulator '" + requested +
+                         "static QEMU user emulator " + requested +
                              (settings_.native
-                                  ? "' was not found at a trusted root-controlled path"
-                                  : "' was not found or is not statically linked")),
+                                  ? " was not found at a trusted root-controlled path"
+                                  : " was not found on PATH or is not statically linked")),
         "enter");
   }
   ElfInfo emulatorInfo = readElfInfoAtPath(source);
