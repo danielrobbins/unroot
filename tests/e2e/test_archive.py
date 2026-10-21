@@ -1350,3 +1350,30 @@ def test_native_unpack_persists_native_ownership_when_root_is_available(
     finally:
         if root.exists() and os.geteuid() != 0:
             run_command([*privileged_prefix, "rm", "-rf", str(root)])
+
+
+def test_unpack_skips_default_injections_when_the_image_has_no_etc(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+) -> None:
+    archive = tmp_path / "scratch.tar"
+    _create_named_archive(archive, "hello", b"hello\n")
+    root = tmp_path / "root"
+
+    result = unroot.run("unpack", str(archive), str(root))
+    assert "destination directory does not exist" not in result.stderr, result.diagnostic()
+    require_capability(
+        result.returncode == 0,
+        "unpack requires rich ID mapping:\n" + result.diagnostic(),
+        "rich_idmap",
+    )
+    result.assert_ok()
+    assert (root / "hello").read_bytes() == b"hello\n"
+
+    listed = unroot.run("inject", "list", str(root), "--json").assert_ok()
+    assert json.loads(listed.stdout) == [] or "hosts" not in listed.stdout
+
+    explicit = unroot.run("inject", "add", str(root), "hosts")
+    assert explicit.returncode != 0, explicit.diagnostic()
+    assert "does not exist" in explicit.stderr, explicit.diagnostic()

@@ -22,6 +22,7 @@
 #include "util/archive_lock.hpp"
 #include "util/error_map.hpp"
 #include "util/fd.hpp"
+#include "util/rootfs.hpp"
 
 namespace actions {
 namespace {
@@ -272,9 +273,20 @@ int ArchiveAction::perform(const UnpackConfig& config) {
       fail("OCI metadata: " + error);
     auto resolvedLayout = meta::resolveRootLayout(pinnedRoot);
     if (!resolvedLayout) fail("layout: " + resolvedLayout.error);
-    if (!injections::add(
-            resolvedLayout.layout, initialized.plan,
-            injections::defaults(config.disabledInjections), error))
+    // An image without /etc (a FROM-scratch OCI image) has nowhere to put the
+    // default injections. Skip those rather than failing the whole unpack and
+    // leaving a half-built root; `inject add` stays strict.
+    auto specs = injections::defaults(config.disabledInjections);
+    util::Rootfs managed(resolvedLayout.layout.managedRoot.string());
+    if (managed)
+      specs.erase(std::remove_if(specs.begin(), specs.end(),
+                                 [&](const injections::Spec& spec) {
+                                   return !managed.parentDirectoryExists(
+                                       spec.destination);
+                                 }),
+                  specs.end());
+    if (!injections::add(resolvedLayout.layout, initialized.plan,
+                         std::move(specs), error))
       fail("injections: " + error);
   }
   return result;
