@@ -56,8 +56,17 @@ using util::hostLogStep;
   for (const auto& argument : emuArgs) newv.push_back(argument.c_str());
   newv.push_back("-0");
   newv.push_back(argv[2]);
-  bool haveFd255 = (fcntl(255, F_GETFD) != -1);
-  if (::getenv("UNROOT_QEMU_NOFD255")) haveFd255 = false;
+  // Use /proc/self/fd/255 only when that descriptor is the program itself. A
+  // caller can leave an unrelated descriptor open at 255 (bash keeps its
+  // script there and does not always set close-on-exec), and handing that to
+  // QEMU makes it try to load the script as the target program.
+  bool haveFd255 = false;
+  if (!::getenv("UNROOT_QEMU_NOFD255")) {
+    struct stat fdStat{}, pathStat{};
+    haveFd255 = ::fstat(255, &fdStat) == 0 && ::stat(argv[1], &pathStat) == 0 &&
+                fdStat.st_dev == pathStat.st_dev &&
+                fdStat.st_ino == pathStat.st_ino;
+  }
   newv.push_back(haveFd255 ? "/proc/self/fd/255" : argv[1]);
   for (int i=3;i<argc;i++) newv.push_back(argv[i]);
   newv.push_back(nullptr);
