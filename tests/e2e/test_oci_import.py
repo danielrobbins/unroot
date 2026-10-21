@@ -399,6 +399,44 @@ def test_oci_import_rejects_unsupported_runnable_media_types(
     assert "unsupported config media type" in config_result.stderr
 
 
+@pytest.mark.parametrize("root_entry", [".", "./"])
+def test_oci_layer_may_contain_a_root_directory_entry(
+    unroot: UnrootRunner,
+    tmp_path: Path,
+    require_capability: Callable[[bool, str, Optional[str]], None],
+    root_entry: str,
+) -> None:
+    """Image builders commonly emit a leading "." entry for the root itself."""
+    image = tmp_path / "root-entry.tar"
+    layer = _layer(
+        [
+            (root_entry, None, "dir"),
+            ("etc", None, "dir"),
+            ("etc/kept", b"yes\n", "file"),
+        ]
+    )
+    _oci_archive(image, [(layer, OCI_LAYER)])
+    root = tmp_path / "root"
+
+    imported = unroot.run(
+        "unpack",
+        *_ownership_arguments(),
+        "--flatten",
+        "--inject=-*",
+        str(image),
+        str(root),
+        timeout=90,
+    )
+    assert "unsafe or reserved path" not in imported.stderr, imported.diagnostic()
+    require_capability(
+        imported.returncode == 0,
+        "OCI flatten import requires rich ID mapping:\n" + imported.diagnostic(),
+        "rich_idmap",
+    )
+    imported.assert_ok()
+    assert (root / "etc" / "kept").read_text() == "yes\n"
+
+
 @pytest.mark.parametrize(
     "entry",
     [

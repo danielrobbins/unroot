@@ -255,6 +255,24 @@ bool safePath(const char* raw, std::vector<std::string>& components) {
   return !components.empty();
 }
 
+// True for a layer entry that names the root directory itself ("." or "./"),
+// which image builders commonly emit. It has no components, so safePath()
+// rejects it, but it is not an unsafe path: there is nothing to extract.
+bool rootDirectoryEntry(const char* raw) {
+  if (!raw || !*raw || *raw == '/') return false;
+  const std::string path(raw);
+  size_t start = 0;
+  while (start <= path.size()) {
+    const size_t end = path.find('/', start);
+    const std::string component = path.substr(
+        start, (end == std::string::npos ? path.size() : end) - start);
+    if (!component.empty() && component != ".") return false;
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  return true;
+}
+
 bool reservedPath(const std::vector<std::string>& components) {
   return !components.empty() && components.front() == ".unroot";
 }
@@ -390,6 +408,13 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
       return false;
     }
     std::vector<std::string> path;
+    if (rootDirectoryEntry(archive_entry_pathname(entry))) {
+      if (archive_read_data_skip(reader.get()) < ARCHIVE_WARN) {
+        archiveFailure(reader.get(), message);
+        return false;
+      }
+      continue;
+    }
     if (!safePath(archive_entry_pathname(entry), path) || reservedPath(path)) {
       message = "OCI layer contains an unsafe or reserved path";
       return false;
@@ -441,6 +466,10 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
 bool prepareLayerPath(struct archive_entry* entry, bool& marker,
                       std::string& message) {
   std::vector<std::string> path;
+  if (rootDirectoryEntry(archive_entry_pathname(entry))) {
+    marker = true;  // skipped like a whiteout marker: the root already exists
+    return true;
+  }
   if (!safePath(archive_entry_pathname(entry), path) || reservedPath(path)) {
     message = "OCI layer contains an unsafe or reserved path";
     return false;
