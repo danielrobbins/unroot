@@ -114,6 +114,22 @@ EmuPlan Manager::prepare() {
     source = util::findOnPath(emulator + "-static");
   if (!settings_.native && source.empty()) source = util::findOnPath(emulator);
   if (source.empty() || !isStaticElf(source)) {
+    // Native entry can run on an already registered fixed-interpreter handler
+    // without an emulator of its own. An explicit --qemu that fails the trust
+    // check is still an error.
+    if (settings_.native && settings_.qemu.empty()) {
+      auto [magic, mask] =
+          readElfMagicAndMaskAtRoot(settings_.root, settings_.executable);
+      if (!magic.empty() && !mask.empty()) {
+        auto registration =
+            ensureHostBinfmt("unroot-" + settings_.targetArch, {}, magic, mask);
+        if (registration && registration.reused) {
+          util::hostLogStep("binfmt:host", true,
+                            "reused " + registration.handler);
+          return {};
+        }
+      }
+    }
     std::string requested = settings_.qemu.empty() ? emulator + "-static"
                                                    : emulator;
     throw AppException(
