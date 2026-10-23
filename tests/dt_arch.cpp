@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "arch.hpp"
 #include "shebang.hpp"
 #include <array>
@@ -80,16 +81,15 @@ TEST_CASE("detectHostArch returns non-empty normalized architecture") {
 }
 
 TEST_CASE("AArch64 ELF headers use the canonical host architecture name") {
-    auto path = std::filesystem::temp_directory_path() /
-        ("unroot-aarch64-" + std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    auto path = fixture.root / "aarch64";
     writeElf(path, 183);
     CHECK(readElfInfoAtPath(path.string()).archName == "arm64");
-    std::filesystem::remove(path);
 }
 
 TEST_CASE("ELF parsing honors byte order and class") {
-    auto base = std::filesystem::temp_directory_path() /
-        ("unroot-endian-" + std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    auto base = fixture.root / "endian";
     auto little = base.string() + "-le";
     auto big = base.string() + "-be";
     auto riscv32 = base.string() + "-rv32";
@@ -105,20 +105,15 @@ TEST_CASE("ELF parsing honors byte order and class") {
     CHECK(bigInfo.archName == "arm64_be");
     CHECK(readElfInfoAtPath(riscv32).archName == "riscv32");
 
-    std::filesystem::remove(little);
-    std::filesystem::remove(big);
-    std::filesystem::remove(riscv32);
 }
 
 TEST_CASE("unsupported ELF class and byte-order combinations are explicit") {
-    auto path = std::filesystem::temp_directory_path() /
-        ("unroot-unsupported-" +
-         std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    auto path = fixture.root / "unsupported";
     writeElf(path, 62, 2, 2);
     auto info = readElfInfoAtPath(path.string());
     CHECK(info.valid);
     CHECK(info.archName.empty());
-    std::filesystem::remove(path);
 }
 
 TEST_CASE("normalized architectures map to conventional QEMU user emulators") {
@@ -136,9 +131,8 @@ TEST_CASE("normalized architectures map to conventional QEMU user emulators") {
 }
 
 TEST_CASE("rootfs ELF probing resolves absolute links inside the root") {
-    auto base = std::filesystem::temp_directory_path() /
-        ("unroot-contained-elf-" +
-         std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& base = fixture.root;
     auto root = base / "root";
     std::filesystem::create_directories(root / "bin");
     writeElf(root / "inside", 183);
@@ -146,20 +140,17 @@ TEST_CASE("rootfs ELF probing resolves absolute links inside the root") {
     std::filesystem::create_symlink("/inside", root / "bin" / "probe");
 
     CHECK(detectElfArchAt(root.string(), "/bin/probe") == "arm64");
-    std::filesystem::remove_all(base);
 }
 
 TEST_CASE("rootfs ELF probing cannot traverse above the root") {
-    auto base = std::filesystem::temp_directory_path() /
-        ("unroot-escaping-elf-" +
-         std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& base = fixture.root;
     auto root = base / "root";
     std::filesystem::create_directories(root / "bin");
     writeElf(base / "outside", 62);
     std::filesystem::create_symlink("../../outside", root / "bin" / "probe");
 
     CHECK(detectElfArchAt(root.string(), "/bin/probe").empty());
-    std::filesystem::remove_all(base);
 }
 
 TEST_CASE("isStaticElf returns bool for /bin/sh (value may vary by distro)") {
@@ -168,22 +159,19 @@ TEST_CASE("isStaticElf returns bool for /bin/sh (value may vary by distro)") {
 }
 
 TEST_CASE("static ELF detection decodes big-endian program headers") {
-    auto base = std::filesystem::temp_directory_path() /
-        ("unroot-static-be-" +
-         std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    auto base = fixture.root / "static-be";
     auto staticElf = base.string() + "-static";
     auto dynamicElf = base.string() + "-dynamic";
     writeElf(staticElf, 183, 2, 2, 1);
     writeElf(dynamicElf, 183, 2, 2, 3);
     CHECK(isStaticElf(staticElf));
     CHECK_FALSE(isStaticElf(dynamicElf));
-    std::filesystem::remove(staticElf);
-    std::filesystem::remove(dynamicElf);
 }
 
 TEST_CASE("executable image resolution follows shebang interpreters") {
-    auto root = std::filesystem::temp_directory_path() /
-        ("unroot-shebang-" + std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& root = fixture.root;
     std::filesystem::create_directories(root / "bin");
     {
         std::ofstream script(root / "bin" / "script");
@@ -192,5 +180,4 @@ TEST_CASE("executable image resolution follows shebang interpreters") {
 
     CHECK(resolveExecutableImage(root, "/bin/script") == "/bin/interpreter");
     CHECK(resolveExecutableImage(root, "/bin/interpreter") == "/bin/interpreter");
-    std::filesystem::remove_all(root);
 }

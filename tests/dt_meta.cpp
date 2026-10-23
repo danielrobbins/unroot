@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "meta.hpp"
 #include "util/idmap.hpp"
 
@@ -10,19 +11,7 @@
 
 namespace {
 
-class MetaTree {
-public:
-    MetaTree() {
-        char pattern[] = "/tmp/unroot-meta-XXXXXX";
-        char* created = ::mkdtemp(pattern);
-        REQUIRE(created != nullptr);
-        root = created;
-    }
-
-    ~MetaTree() { std::filesystem::remove_all(root); }
-
-    std::filesystem::path root;
-};
+using MetaTree = test::TempDirectory;
 
 } // namespace
 

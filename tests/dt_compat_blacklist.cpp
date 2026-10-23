@@ -1,5 +1,6 @@
 // doctest version of compat blacklist tests (ported from Catch2)
 #include "../third_party/doctest/doctest.h"
+#include "test_support.hpp"
 #include "compat_blacklist.hpp"
 #include <filesystem>
 #include <fstream>
@@ -23,9 +24,8 @@ TEST_CASE("compat: parseQemuVersionLine extracts version components") {
 }
 
 TEST_CASE("compat: emulator probing does not invoke a shell") {
-  auto directory = std::filesystem::temp_directory_path() /
-                   ("unroot-compat-" + std::to_string(::getpid()));
-  std::filesystem::create_directory(directory);
+  test::TempDirectory fixture;
+  const auto& directory = fixture.root;
   auto executable = directory / "qemu;echo-shell";
   {
     std::ofstream script(executable);
@@ -34,7 +34,6 @@ TEST_CASE("compat: emulator probing does not invoke a shell") {
   REQUIRE(::chmod(executable.c_str(), 0700) == 0);
 
   CHECK(probeVersionLine(executable.string()) == "qemu-test version 9.8.7");
-  std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("compat: versionPrefixMatches logic") {

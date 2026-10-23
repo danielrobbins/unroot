@@ -5,6 +5,10 @@ to execute the shipped `bin/unroot` binary and its `bin/unroot-util` sibling
 against real Linux namespace and mount primitives. `make e2e-cross` adds
 foreign-architecture execution.
 
+C++ unit fixtures use unique `test-XXXXXX` directories under the configured build directory, normally `build/`, and remove them when each fixture leaves scope, including assertion failures. They do not reuse or clean up old host `/tmp/unroot_*` directories. Tests that change environment variables restore their previous values. The normal test binaries record the build directory at compile time, so invoking them from another working directory does not move their scratch files; the standalone coverage recipes use `build/` relative to the repository working directory.
+
+These filesystem tests require Linux filesystem semantics, including renaming directories while they are open. If the checkout is on a filesystem that does not support that, select a build directory on a Linux filesystem with `make test BUILD_DIR=/path/to/unroot-build`. Scratch files stay under that build directory; the tests do not silently fall back to host `/tmp` or skip failed filesystem operations.
+
 Create a Python development environment and enable the commit hooks with:
 
 ```sh

@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "binfmt.hpp"
 
 #include <filesystem>
@@ -7,17 +8,11 @@
 
 namespace {
 
-class BinfmtTree {
+class BinfmtTree : public test::TempDirectory {
 public:
     BinfmtTree() {
-        char pattern[] = "/tmp/unroot-binfmt-XXXXXX";
-        char* created = ::mkdtemp(pattern);
-        REQUIRE(created != nullptr);
-        root = created;
         std::ofstream(root / "register");
     }
-
-    ~BinfmtTree() { std::filesystem::remove_all(root); }
 
     void handler(const std::string& name, const std::string& magic,
                  const std::string& mask, bool enabled = true,
@@ -31,7 +26,6 @@ public:
                << "mask " << mask << "\n";
     }
 
-    std::filesystem::path root;
 };
 
 } // namespace

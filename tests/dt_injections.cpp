@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "injections.hpp"
 
 #include <filesystem>
@@ -7,20 +8,13 @@
 
 namespace {
 
-class InjectionTree {
+class InjectionTree : public test::TempDirectory {
  public:
   InjectionTree() {
-    char pattern[] = "/tmp/unroot-injections-XXXXXX";
-    char* created = ::mkdtemp(pattern);
-    REQUIRE(created != nullptr);
-    root = created;
     std::filesystem::create_directories(
         root / ".unroot" / "injections" / "original" / "etc");
   }
 
-  ~InjectionTree() { std::filesystem::remove_all(root); }
-
-  std::filesystem::path root;
 };
 
 meta::RootLayout flatLayout(const std::filesystem::path& root) {

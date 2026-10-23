@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -13,19 +14,14 @@ namespace {
 
 struct TemporaryTree {
   TemporaryTree() {
-    char pattern[] = "/tmp/unroot-rootfs-test-XXXXXX";
-    char* created = ::mkdtemp(pattern);
-    REQUIRE(created != nullptr);
-    base = created;
     root = base / "root";
     outside = base / "outside";
     fs::create_directories(root);
     fs::create_directories(outside);
   }
 
-  ~TemporaryTree() { fs::remove_all(base); }
-
-  fs::path base;
+  test::TempDirectory temporary;
+  fs::path base = temporary.root;
   fs::path root;
   fs::path outside;
 };

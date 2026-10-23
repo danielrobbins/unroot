@@ -637,6 +637,7 @@ DOCTEST_SRCS := $(DOCTEST_TEST_SRCS) $(DOCTEST_HARNESS_SRCS)
 DOCTEST_OBJECTS := $(addprefix $(BUILD_DIR)/doctest/,$(DOCTEST_SRCS:.cpp=.o))
 DOCTEST_DEPS := $(DOCTEST_OBJECTS:.o=.d)
 DOCTEST_FLAGS := $(filter-out -static,$(CXXFLAGS)) -DUNROOT_ENABLE_DOCTEST \
+	-DUNROOT_TEST_BUILD_DIR='"$(abspath $(BUILD_DIR))"' \
 	-I$(SRC_DIR) -I$(INC_DIR2) -Ithird_party/doctest -Ithird_party/picosha2
 
 -include $(DOCTEST_DEPS)

@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "actions/enter_config.hpp"
 #include "actions/parsed_args.hpp"
 #include "app_exception.hpp"
@@ -152,8 +153,8 @@ TEST_CASE("EnterConfig rejects contradictory emulation controls") {
 }
 
 TEST_CASE("EnterConfig probes the requested absolute command before /bin/sh") {
-    auto root = std::filesystem::temp_directory_path() /
-        ("unroot-command-probe-" + std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& root = fixture.root;
     std::filesystem::create_directories(root / "bin");
     std::array<unsigned char, 64> header{};
     header[0] = 0x7f;
@@ -174,13 +175,11 @@ TEST_CASE("EnterConfig probes the requested absolute command before /bin/sh") {
     cfg.shell = {"/bin/probe"};
     cfg.analyzeArchitecture();
     CHECK(cfg.targetArch == "arm64");
-    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("EnterConfig rejects recognized but unsupported ELF combinations") {
-    auto root = std::filesystem::temp_directory_path() /
-        ("unroot-unsupported-probe-" +
-         std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& root = fixture.root;
     std::filesystem::create_directories(root / "bin");
     std::array<unsigned char, 64> header{};
     header[0] = 0x7f;
@@ -208,13 +207,11 @@ TEST_CASE("EnterConfig rejects recognized but unsupported ELF combinations") {
               std::string::npos);
     }
     CHECK(rejected);
-    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("EnterConfig resolves bare and relative commands before probing ELF") {
-    auto root = std::filesystem::temp_directory_path() /
-        ("unroot-resolved-probe-" +
-         std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& root = fixture.root;
     std::filesystem::create_directories(root / "bin");
     std::filesystem::create_directories(root / "work");
     std::array<unsigned char, 64> header{};
@@ -248,12 +245,11 @@ TEST_CASE("EnterConfig resolves bare and relative commands before probing ELF") 
     relative.analyzeArchitecture();
     CHECK(relative.targetExecutable == "/work/probe");
     CHECK(relative.targetArch == "arm64");
-    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("EnterConfig can prepare foreign children without changing the command") {
-    auto root = std::filesystem::temp_directory_path() /
-        ("unroot-child-probe-" + std::to_string(static_cast<long long>(::getpid())));
+    test::TempDirectory fixture;
+    const auto& root = fixture.root;
     std::filesystem::create_directories(root / "bin");
     std::filesystem::copy_file("/proc/self/exe", root / "bin/native",
         std::filesystem::copy_options::overwrite_existing);
@@ -303,7 +299,6 @@ TEST_CASE("EnterConfig can prepare foreign children without changing the command
     }
     cfg.emulationFor = "/bin/other";
     REQUIRE_THROWS_AS(cfg.analyzeArchitecture(), AppException);
-    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("EnterConfig requires an absolute emulation reference") {

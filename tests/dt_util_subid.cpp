@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "util/subid.hpp"
 #include "util/subid_backend.hpp"
 
@@ -14,17 +15,8 @@ using namespace util;
 
 namespace {
 
-class TempTree {
+class TempTree : public test::TempDirectory {
 public:
-    TempTree() {
-        char pattern[] = "/tmp/unroot-subid-XXXXXX";
-        char* created = ::mkdtemp(pattern);
-        REQUIRE(created != nullptr);
-        root = created;
-    }
-
-    ~TempTree() { std::filesystem::remove_all(root); }
-
     std::filesystem::path write(const std::string& name,
                                 const std::string& content,
                                 bool executable = false) const {
@@ -34,7 +26,6 @@ public:
         return path;
     }
 
-    std::filesystem::path root;
 };
 
 } // namespace
