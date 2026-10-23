@@ -11,7 +11,6 @@ import sys
 import tarfile
 import time
 from pathlib import Path
-from typing import Callable, Optional
 
 import pytest
 
@@ -459,8 +458,9 @@ def _assert_payload_tree(root: Path) -> None:
 def test_pack_and_unpack_round_trip_rootfs_metadata(
     unroot: UnrootRunner,
     tmp_path: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
+    require_rich_idmap()
     _require_fixture_tar()
     source = tmp_path / "source"
     source.mkdir()
@@ -485,11 +485,6 @@ def test_pack_and_unpack_round_trip_rootfs_metadata(
 
     root = tmp_path / "root"
     result = unroot.run("unpack", "--inject=-*", str(original), str(root))
-    require_capability(
-        result.returncode == 0,
-        "archive round trip requires rich ID mapping:\n" + result.diagnostic(),
-        "rich_idmap",
-    )
     result.assert_ok()
     _assert_payload_tree(root)
     metadata = json.loads((root / ".unroot" / "meta.json").read_text())

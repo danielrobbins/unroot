@@ -9,7 +9,6 @@ import re
 import sys
 import tarfile
 from pathlib import Path
-from typing import Callable, Optional
 
 import pytest
 
@@ -211,8 +210,10 @@ def _working_layers() -> list[tuple[bytes, str]]:
 def test_flatten_import_applies_ordered_layers_and_records_provenance(
     unroot: UnrootRunner,
     tmp_path: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
+    if os.geteuid() != 0:
+        require_rich_idmap()
     image = tmp_path / "image.tar"
     expected = _oci_archive(image, _working_layers(), index_variant="v3")
     root = tmp_path / "root"
@@ -227,11 +228,6 @@ def test_flatten_import_applies_ordered_layers_and_records_provenance(
         str(image),
         str(root),
         timeout=90,
-    )
-    require_capability(
-        imported.returncode == 0,
-        "OCI flatten import requires rich ID mapping:\n" + imported.diagnostic(),
-        "rich_idmap",
     )
     imported.assert_ok()
 
@@ -336,8 +332,10 @@ def test_oci_import_rejects_wrong_platform_and_corrupt_content(
 def test_oci_import_selects_an_explicit_image_from_a_multi_platform_index(
     unroot: UnrootRunner,
     tmp_path: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
+    if os.geteuid() != 0:
+        require_rich_idmap()
     image = tmp_path / "multi-platform.tar"
     expected = _oci_archive(
         image,
@@ -356,11 +354,6 @@ def test_oci_import_selects_an_explicit_image_from_a_multi_platform_index(
         str(image),
         str(root),
         timeout=90,
-    )
-    require_capability(
-        imported.returncode == 0,
-        "OCI flatten import requires rich ID mapping:\n" + imported.diagnostic(),
-        "rich_idmap",
     )
     imported.assert_ok()
 

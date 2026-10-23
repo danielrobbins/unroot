@@ -9,7 +9,7 @@ from typing import Callable, Optional
 
 import pytest
 
-from .support import UnrootRunner, rich_idmap_available
+from .support import UnrootRunner
 
 
 pytestmark = [
@@ -30,6 +30,7 @@ def test_alpine_rootfs_can_be_unpacked_entered_modified_packed_and_restored(
     unroot: UnrootRunner,
     tmp_path: Path,
     require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
     prefix = "OCI" if archive_format == "oci" else "ALPINE"
     capability = "oci_journey" if archive_format == "oci" else "rootfs_journey"
@@ -41,11 +42,7 @@ def test_alpine_rootfs_can_be_unpacked_entered_modified_packed_and_restored(
         f"{role.lower()} rootfs archive and architecture are not configured",
         capability,
     )
-    require_capability(
-        rich_idmap_available(unroot),
-        "the real-rootfs journey requires rich ID mapping",
-        capability,
-    )
+    require_rich_idmap(capability=capability)
 
     root = tmp_path / "root"
     import_options = ("--flatten",) if archive_format == "oci" else ()
