@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "util/archive_lock.hpp"
 
 #include <filesystem>
@@ -7,19 +8,7 @@
 
 namespace {
 
-class LockTree {
-public:
-    LockTree() {
-        char pattern[] = "/tmp/unroot-archive-lock-XXXXXX";
-        char* created = ::mkdtemp(pattern);
-        REQUIRE(created != nullptr);
-        root = created;
-    }
-
-    ~LockTree() { std::filesystem::remove_all(root); }
-
-    std::filesystem::path root;
-};
+using LockTree = test::TempDirectory;
 
 } // namespace
 
@@ -66,32 +55,29 @@ TEST_CASE("archive lock is released when its process exits") {
 
 TEST_CASE("archive lock detects root path replacement") {
     LockTree tree;
-    auto lock = util::acquireArchiveLock(tree.root, false);
+    const auto root = tree.root / "root";
+    const auto moved = tree.root / "moved";
+    std::filesystem::create_directory(root);
+    auto lock = util::acquireArchiveLock(root, false);
     REQUIRE(lock);
-    const auto moved = tree.root.string() + "-moved";
-    std::filesystem::rename(tree.root, moved);
-    std::filesystem::create_directory(tree.root);
+    std::filesystem::rename(root, moved);
+    std::filesystem::create_directory(root);
 
     CHECK_FALSE(lock.matchesRoot());
-
-    std::filesystem::remove_all(tree.root);
-    std::filesystem::rename(moved, tree.root);
 }
 
 TEST_CASE("archive lock detects parent path replacement") {
     LockTree tree;
-    const auto root = tree.root / "root";
-    std::filesystem::create_directory(root);
+    const auto parent = tree.root / "parent";
+    const auto root = parent / "root";
+    const auto moved = tree.root / "moved";
+    std::filesystem::create_directories(root);
     auto lock = util::acquireArchiveLock(root, false);
     REQUIRE(lock);
-    const auto moved = tree.root.string() + "-moved";
-    std::filesystem::rename(tree.root, moved);
+    std::filesystem::rename(parent, moved);
     std::filesystem::create_directories(root);
 
     CHECK_FALSE(lock.matchesRoot());
-
-    std::filesystem::remove_all(tree.root);
-    std::filesystem::rename(moved, tree.root);
 }
 
 TEST_CASE("archive lock creates and pins a missing rootfs") {

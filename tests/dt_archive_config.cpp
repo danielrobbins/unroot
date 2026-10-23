@@ -2,6 +2,7 @@
 #include "actions/parsed_args.hpp"
 #include "app_exception.hpp"
 #include "doctest.h"
+#include "test_support.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -14,16 +15,11 @@ namespace {
 class TempArchive {
 public:
   TempArchive() {
-    char pattern[] = "/tmp/unroot-archive-config-XXXXXX";
-    int fd = ::mkstemp(pattern);
-    REQUIRE(fd >= 0);
-    REQUIRE(::close(fd) == 0);
-    path = pattern;
+    std::ofstream output(path);
+    REQUIRE(output.good());
   }
-
-  ~TempArchive() { std::filesystem::remove(path); }
-
-  std::filesystem::path path;
+  test::TempDirectory temporary;
+  std::filesystem::path path = temporary.root / "archive.tar";
 };
 
 }  // namespace

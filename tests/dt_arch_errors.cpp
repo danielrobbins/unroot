@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "arch.hpp"
 #include <fstream>
 #include <cstdio>
@@ -12,7 +13,8 @@ TEST_CASE("readElfInfoAtPathEx non-existent path returns Io error") {
 }
 
 TEST_CASE("readElfInfoAtPathEx non-ELF regular file returns Invalid error") {
-    std::string tmp = std::filesystem::temp_directory_path() / "unroot_nonelf_test.txt";
+    test::TempDirectory fixture;
+    std::string tmp = fixture.root / "nonelf.txt";
     {
         std::ofstream ofs(tmp);
         ofs << "hello"; // plain text, not ELF
@@ -20,5 +22,4 @@ TEST_CASE("readElfInfoAtPathEx non-ELF regular file returns Invalid error") {
     auto r = readElfInfoAtPathEx(tmp);
     CHECK(!r.ok());
     CHECK(r.error().code == util::LibErr::Invalid);
-    std::filesystem::remove(tmp);
 }

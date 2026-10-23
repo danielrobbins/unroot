@@ -1,4 +1,5 @@
 #include "doctest.h"
+#include "test_support.hpp"
 #include "util/path.hpp"
 #include <filesystem>
 #include <fstream>
@@ -13,32 +14,32 @@ static void make_exec(const std::filesystem::path& p) {
 
 TEST_CASE("findOnPath basic lookup skips relative and finds first executable") {
     // create a temp dir structure
-    std::filesystem::path tmp = std::filesystem::temp_directory_path() / "unroot_ut_path1";
-    std::filesystem::remove_all(tmp);
+    test::TempDirectory fixture;
+    const auto& tmp = fixture.root;
     std::filesystem::create_directories(tmp / "bin1");
     std::filesystem::create_directories(tmp / "bin2");
     make_exec(tmp/"bin2"/"tool");
     // bin1 intentionally missing tool, bin2 has it
     std::string newPath = (tmp/"bin1").string() + ":" + (tmp/"bin2").string();
-    setenv("PATH", newPath.c_str(), 1);
+    test::ScopedEnvironment path("PATH", newPath.c_str());
     std::string found = findOnPath("tool");
     REQUIRE(!found.empty());
     REQUIRE(found.find("bin2/tool") != std::string::npos);
 }
 
 TEST_CASE("findOnPath returns empty when not found") {
-    std::filesystem::path tmp = std::filesystem::temp_directory_path() / "unroot_ut_path2";
-    std::filesystem::remove_all(tmp);
+    test::TempDirectory fixture;
+    const auto& tmp = fixture.root;
     std::filesystem::create_directories(tmp/"binA");
     std::string newPath = (tmp/"binA").string();
-    setenv("PATH", newPath.c_str(), 1);
+    test::ScopedEnvironment path("PATH", newPath.c_str());
     REQUIRE(findOnPath("idontexist").empty());
 }
 
 TEST_CASE("resolveExecInRoot relative path success and permission checks") {
     namespace fs = std::filesystem;
-    fs::path tmp = fs::temp_directory_path() / "unroot_ut_root1";
-    fs::remove_all(tmp);
+    test::TempDirectory fixture;
+    const auto& tmp = fixture.root;
     fs::create_directories(tmp / "sub" / "dir");
     // create executable relative to cwdInRoot
     fs::path exe = tmp/"sub"/"dir"/"prog";
@@ -52,8 +53,8 @@ TEST_CASE("resolveExecInRoot relative path success and permission checks") {
 
 TEST_CASE("resolveExecInRoot relative path missing executable") {
     namespace fs = std::filesystem;
-    fs::path tmp = fs::temp_directory_path() / "unroot_ut_root2";
-    fs::remove_all(tmp);
+    test::TempDirectory fixture;
+    const auto& tmp = fixture.root;
     fs::create_directories(tmp / "sub" / "dir");
     std::string err;
     std::string resolved = resolveExecInRoot(tmp.string(), "/sub/dir", "prog", ".", &err);
@@ -63,8 +64,8 @@ TEST_CASE("resolveExecInRoot relative path missing executable") {
 
 TEST_CASE("resolveExecInRoot PATH search with dot and absolute entries") {
     namespace fs = std::filesystem;
-    fs::path tmp = fs::temp_directory_path() / "unroot_ut_root3";
-    fs::remove_all(tmp);
+    test::TempDirectory fixture;
+    const auto& tmp = fixture.root;
     fs::create_directories(tmp/"a");
     fs::create_directories(tmp/"b");
     make_exec(tmp/"b"/"tool");
@@ -76,9 +77,8 @@ TEST_CASE("resolveExecInRoot PATH search with dot and absolute entries") {
 }
 
 TEST_CASE("resolveExecInRoot PATH search fails") {
-    namespace fs = std::filesystem;
-    fs::path tmp = fs::temp_directory_path() / "unroot_ut_root4";
-    fs::remove_all(tmp);
+    test::TempDirectory fixture;
+    const auto& tmp = fixture.root;
     std::string err;
     std::string pathEnv = ":."; // empty and dot only, but no cwdInRoot entries
     std::string resolved = resolveExecInRoot(tmp.string(), "", "tool", pathEnv, &err);
