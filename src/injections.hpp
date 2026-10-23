@@ -21,6 +21,7 @@ struct Spec {
   unsigned int uid = 0;
   unsigned int gid = 0;
   mode_t mode = 0644;
+  bool skipMissingParent = false;
   UniqueFd sourceFd;
 };
 

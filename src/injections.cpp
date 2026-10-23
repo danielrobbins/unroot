@@ -5,6 +5,7 @@
 #include <cctype>
 #include <charconv>
 #include <fcntl.h>
+#include <iostream>
 #include <set>
 #include <stdexcept>
 #include <sys/stat.h>
@@ -334,6 +335,7 @@ auto findTarget(std::vector<Entry>& entries, const std::string& target) {
 
 std::vector<Spec> defaults(const std::vector<std::string>& disabled) {
   auto result = builtins();
+  for (auto& spec : result) spec.skipMissingParent = true;
   if (std::find(disabled.begin(), disabled.end(), "*") != disabled.end())
     return {};
   result.erase(std::remove_if(result.begin(), result.end(), [&](const Spec& spec) {
@@ -411,12 +413,25 @@ bool list(const meta::RootLayout& layout, std::vector<Entry>& entries,
 
 bool add(const meta::RootLayout& layout, const util::IdMapPlan& idmap,
          std::vector<Spec> specs, std::string& error) {
-  if (!prepareSources(specs, idmap, error)) return false;
   util::Rootfs root(layout.managedRoot.string());
   if (!root || root.isHostRoot()) {
     error = "unable to open a distinct managed rootfs";
     return false;
   }
+  specs.erase(std::remove_if(specs.begin(), specs.end(), [&](const Spec& spec) {
+                if (!spec.skipMissingParent ||
+                    root.parentDirectoryExists(
+                        layout.inManagedRoot(spec.destination)) ||
+                    errno != ENOENT)
+                  return false;
+                // Other lookup failures still go through the mapped helper.
+                std::cerr << "Notice: skipping default injection '" << spec.name
+                          << "': destination directory does not exist for "
+                          << spec.destination << '\n';
+                return true;
+              }),
+              specs.end());
+  if (!prepareSources(specs, idmap, error)) return false;
   std::vector<Entry> entries;
   if (!readRegistry(root, entries, error)) return false;
   for (auto& spec : specs) {
