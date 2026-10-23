@@ -48,6 +48,21 @@ TEST_CASE("rootfs metadata persists the exact kernel ID map") {
     CHECK_FALSE(json.contains("injections"));
 }
 
+TEST_CASE("only absent ownership metadata is treated as unmanaged") {
+    MetaTree tree;
+    CHECK(meta::readIdMap(tree.root).error.empty());
+    CHECK_FALSE(meta::readIdMap(tree.root).found);
+    std::filesystem::create_directory(tree.root / ".unroot");
+    CHECK(meta::readIdMap(tree.root).error.empty());
+    const auto path = tree.root / ".unroot" / "meta.json";
+    std::filesystem::create_directory(path);
+    CHECK_FALSE(meta::readIdMap(tree.root).error.empty());
+    std::filesystem::remove(path);
+    std::filesystem::create_symlink("missing", path);
+    CHECK_FALSE(meta::readIdMap(tree.root).error.empty());
+    CHECK_FALSE(meta::readIdMap(tree.root / "missing").error.empty());
+}
+
 TEST_CASE("rootfs metadata persists a larger rich ID map") {
     MetaTree tree;
     auto plan = util::makeRichIdMap(1000, 2000, 100000, 300000, 100000,
