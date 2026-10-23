@@ -49,6 +49,10 @@ nlohmann::json ArchiveReport::toJson() const {
       {"regular_bytes", regularBytes},
       {"max_uid", maxUid},
       {"max_gid", maxGid},
+      {"outside_dev", {{"max_uid", outsideDev.maxUid},
+                       {"max_gid", outsideDev.maxGid},
+                       {"posix_acl", outsideDev.posixAcl},
+                       {"xattr", outsideDev.xattr}}},
       {"layout", std::move(layout)},
       {"metadata",
        {{"unsafe_paths", findingJson(unsafePaths)},
@@ -95,6 +99,16 @@ ReportResult parseRecord(const std::string& record) {
       return {{}, "invalid archive inspection response"};
 
     const auto& layout = value["layout"];
+    if (!value.contains("outside_dev") || !value["outside_dev"].is_object())
+      return {{}, "invalid archive inspection response"};
+    const auto& outsideDev = value["outside_dev"];
+    if (!unsignedValue(outsideDev, "max_uid", report.outsideDev.maxUid) ||
+        !unsignedValue(outsideDev, "max_gid", report.outsideDev.maxGid) ||
+        !outsideDev.contains("posix_acl") || !outsideDev["posix_acl"].is_boolean() ||
+        !outsideDev.contains("xattr") || !outsideDev["xattr"].is_boolean())
+      return {{}, "invalid archive inspection response"};
+    report.outsideDev.posixAcl = outsideDev["posix_acl"].get<bool>();
+    report.outsideDev.xattr = outsideDev["xattr"].get<bool>();
     if (!layout.contains("reserved_metadata") ||
         !layout["reserved_metadata"].is_boolean() ||
         !layout.contains("oci") || !layout["oci"].is_boolean())

@@ -19,11 +19,14 @@ struct IdMapMetaResult {
     explicit operator bool() const { return found && error.empty(); }
 };
 
+enum class DevPolicy { Existing, Preserve, Discard };
+
 struct RootLayout {
     fs::path managedRoot;
     fs::path effectiveRoot;
     std::string rootPrefix;
     UniqueFd effectiveFd;
+    DevPolicy devPolicy = DevPolicy::Existing;
 
     bool prefixed() const { return !rootPrefix.empty(); }
     std::string inManagedRoot(const std::string& absolutePath) const;
@@ -62,6 +65,7 @@ bool validRootPrefix(const std::string& prefix);
 RootLayoutResult resolveRootLayout(const fs::path& rootfs);
 bool setRootPrefix(const fs::path& rootfs, const std::string& prefix,
                    std::string& error);
+bool setDevPolicy(const fs::path& rootfs, bool preserve, std::string& error);
 bool setOciProvenance(const fs::path& rootfs,
                       const nlohmann::json& provenance,
                       std::string& error);

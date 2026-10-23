@@ -22,6 +22,7 @@
 #include "util/archive_lock.hpp"
 #include "util/error_map.hpp"
 #include "util/fd.hpp"
+#include "util/rootfs.hpp"
 
 namespace actions {
 namespace {
@@ -123,16 +124,17 @@ void requireMappedOwnership(const archiveinfo::ArchiveReport& report,
     fail("archive ownership exceeds the Linux UID/GID domain");
   if (idmap.mode != util::IdMapMode::Rich) return;
   const uint64_t limit = util::subordinateIdCount(idmap);
-  if (report.maxUid <= limit && report.maxGid <= limit) return;
+  const auto& required = report.outsideDev;
+  if (required.maxUid <= limit && required.maxGid <= limit) return;
   fail("archive ownership exceeds the selected rich ID map; use --id-count " +
-       std::to_string(maximum) + " or unpack "
+       std::to_string(std::max(required.maxUid, required.maxGid)) + " or unpack "
        "with --native");
 }
 
 void requireFilesystemCapabilities(const archiveinfo::ArchiveReport& report,
                                    const fs::path& root, bool force) {
-  const bool needsAcl = report.acls.count != 0;
-  const bool needsXattr = report.xattrs.count != 0;
+  const bool needsAcl = report.outsideDev.posixAcl;
+  const bool needsXattr = report.outsideDev.xattr;
   if (!needsAcl && !needsXattr) return;
   auto inspected = fsinfo::FilesystemInspector().inspect(root);
   if (!inspected)
@@ -182,6 +184,18 @@ int ArchiveAction::perform(const PackConfig& config) {
                                  util::subordinateIdCount(stored.plan), false);
   auto resolvedLayout = meta::resolveRootLayout(pinnedRoot);
   if (!resolvedLayout) fail("layout: " + resolvedLayout.error);
+  archiveio::DeviceTree devices;
+  UniqueFd devArchive;
+  const auto& layout = resolvedLayout.layout;
+  if (layout.devPolicy != meta::DevPolicy::Existing) {
+    devices.path = layout.inManagedRoot("/dev").substr(1);
+    if (layout.devPolicy == meta::DevPolicy::Preserve) {
+      devArchive = util::Rootfs(pinnedRoot.string()).file(
+          archiveio::DeviceArchive, O_RDONLY | O_NONBLOCK);
+      if (!devArchive) fail("preserved /dev archive is missing or inaccessible");
+      devices.descriptor = devArchive.get();
+    }
+  }
   auto injectionPlan = injections::archivePlan(resolvedLayout.layout);
   if (!injectionPlan) fail(injectionPlan.error);
   if (!exclusions::archivePatterns(resolvedLayout.layout, injectionPlan.patterns,
@@ -190,7 +204,7 @@ int ArchiveAction::perform(const PackConfig& config) {
 
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   const int result = backend.create(pinnedRoot, idmap, output.descriptor(),
-                                    archivePath, injectionPlan, config.force);
+                                    archivePath, injectionPlan, config.force, devices);
   if (result == -1) fail("unable to prepare archive output");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   if (result == 0) output.publish();
@@ -245,9 +259,25 @@ int ArchiveAction::perform(const UnpackConfig& config) {
   if (initialized.plan.mode != mode)
     fail("rootfs ownership mode changed during initialization");
 
+  const bool preserveDev = !config.discardDev && !ociPlan;
+  std::string devError;
+  if (!meta::setDevPolicy(pinnedRoot, preserveDev, devError)) fail(devError);
+  util::Rootfs managed(pinnedRoot.string());
+  archiveio::DeviceTree devices{
+      config.rootPrefix.empty() ? "dev" : config.rootPrefix + "/dev", -1};
+  UniqueFd devArchive;
+  if (preserveDev) {
+    devArchive = managed.file(archiveio::DeviceArchiveTemporary,
+                             O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (!devArchive) fail("unable to create preserved /dev archive");
+    devices.descriptor = devArchive.get();
+  }
+
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");
   int result = 0;
   if (ociPlan) {
+    if (ociPlan->image().layers.empty() && !managed.directory("/dev", true))
+      fail("unable to create runtime /dev directory");
     for (const auto& layer : ociPlan->image().layers) {
       archiveio::Input layerInput(layer.archive);
       if (!layerInput) fail(layerInput.error());
@@ -256,7 +286,15 @@ int ArchiveAction::perform(const UnpackConfig& config) {
       if (result != 0) break;
     }
   } else {
-    result = backend.extract(pinnedRoot, initialized.plan, input, config.force);
+    result = backend.extract(pinnedRoot, initialized.plan, input, config.force,
+                             devices);
+  }
+  if (preserveDev) {
+    if (result == 0 && (::fsync(devArchive.get()) != 0 ||
+                        !managed.move(archiveio::DeviceArchiveTemporary,
+                                      archiveio::DeviceArchive)))
+      fail("unable to publish preserved /dev archive");
+    if (result != 0) (void)managed.remove(archiveio::DeviceArchiveTemporary);
   }
   if (result == -1) fail("unable to prepare archive for extraction");
   if (!archiveLock.matchesRoot()) fail("ROOT changed during archive operation");

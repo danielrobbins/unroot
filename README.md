@@ -321,7 +321,7 @@ native-architecture builds are unaffected.
 
 ## Rootfs Archives
 
-Unroot supports raw root filesystem tar archives, with filesystem entries such as `bin/`, `etc/`, and `usr/` directly at the archive root. Gentoo and Funtoo stage tarballs are common examples. When a raw archive wraps its rootfs in a directory, use `--root-prefix PATH` to record that directory as the effective root while preserving the complete archive layout.
+Unroot can unpack raw root filesystem archives in tar or cpio format, with filesystem entries such as `bin/`, `etc/`, and `usr/` directly at the archive root. Gentoo and Funtoo stage tarballs are common examples. The input format is detected automatically by libarchive; no external `tar` or `cpio` command is required. `pack` always produces a tar archive, regardless of the input format. When a raw archive wraps its rootfs in a directory, use `--root-prefix PATH` to record that directory as the effective root while preserving the complete archive layout.
 
 OCI image-layout archives can be imported explicitly by flattening their ordered layers into a normal managed rootfs:
 

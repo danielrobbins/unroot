@@ -132,7 +132,7 @@ def require_rich_idmap(unroot_binary: Path, require_capability):
         allocation, reason = rich_idmap_allocation(
             unroot_binary.with_name("unroot-util"), count
         )
-        return allocation, reason or rich_namespace_unavailable()
+        return allocation, reason or rich_namespace_unavailable(allocation, count)
 
     def require(count=65535, capability="rich_idmap"):
         allocation, reason = qualify(count)

@@ -273,41 +273,19 @@ static bool bindRootfsSelf(const util::Rootfs& root) {
 static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
                         const EmuPlan* emu,
                         const std::vector<BindMap>* maps) {
-  // User-requested map binds (enforced): abort on failure
-  if (maps) {
-    for (const auto& m : *maps) {
-      if (m.dst.empty() || m.dst.front() != '/' || m.dst == "/") {
-        recordStep("bind:map:invalid", false, true, "dst invalid");
-        return false;
-      }
-      struct stat st{};
-      if (::stat(m.src.c_str(), &st) != 0) {
-        recordStep("bind:map:source", false, true, "source unavailable");
-        return false;
-      }
-      bool isDir = S_ISDIR(st.st_mode);
-      bool mounted = bindRootfsTarget(
-          root, m.src.c_str(), m.dst, isDir, isDir, m.readonly,
-          m.readonly ? (isDir ? "bind:map(dir,ro)" : "bind:map(file,ro)")
-                     : (isDir ? "bind:map(dir,rw)" : "bind:map(file,rw)"),
-          true, nullptr);
-      if (!mounted) return false;
-    }
-  }
-  // Mount QEMU after maps so a prefixed root's /.unroot bind cannot hide it.
-  if (emu && !emu->source.empty() && !emu->target.empty()) {
-    std::string note = std::string("static emulator: src=") + emu->source +
-                       " dst=" + emu->target;
-    if (!bindRootfsTarget(root, emu->source.c_str(), emu->target, false,
-                          false, true, "bind:emu", true, note.c_str()))
-      return false;
-  }
   // Only host binds pre-chroot
   if (opt.bindDev) {
     if (!bindRootfsTarget(root, "/dev", "/dev", true, true, false,
                           "bind:/dev", true, "essential device nodes"))
       return false;
   } else {
+    // Keep device mountpoints and compatibility links off the persistent root.
+    UniqueFd dev = root.mountTarget("/dev", true);
+    bool mounted = dev && mount_ok("tmpfs", util::Rootfs::fdPath(dev.get()).c_str(),
+                                   "tmpfs", MS_NOSUID | MS_NOEXEC,
+                                   "mode=0755,size=16M");
+    recordStep("mount:tmpfs:/dev", mounted, true, "private runtime devices");
+    if (!mounted) return false;
     // Minimal /dev: bind only a few essential character devices
     if (!bindRootfsTarget(root, "/dev/null", "/dev/null", false, false,
                           false, "bind:/dev/null", true, "minimal dev"))
@@ -326,6 +304,35 @@ static bool setupRootfs(const util::Rootfs& root, const NsOptions& opt,
     if (!bindRootfsTarget(root, "/sys", "/sys", true, true, true,
                           "bind:/sys", false,
                           "readonly host sysfs visibility"))
+      return false;
+  }
+  // Explicit maps override the default mounts, including the temporary /dev.
+  if (maps) {
+    for (const auto& m : *maps) {
+      if (m.dst.empty() || m.dst.front() != '/' || m.dst == "/") {
+        recordStep("bind:map:invalid", false, true, "dst invalid");
+        return false;
+      }
+      struct stat st{};
+      if (::stat(m.src.c_str(), &st) != 0) {
+        recordStep("bind:map:source", false, true, "source unavailable");
+        return false;
+      }
+      bool isDir = S_ISDIR(st.st_mode);
+      if (!bindRootfsTarget(
+              root, m.src.c_str(), m.dst, isDir, isDir, m.readonly,
+              m.readonly ? (isDir ? "bind:map(dir,ro)" : "bind:map(file,ro)")
+                         : (isDir ? "bind:map(dir,rw)" : "bind:map(file,rw)"),
+              true, nullptr))
+        return false;
+    }
+  }
+  // Mount QEMU after maps so a prefixed root's /.unroot bind cannot hide it.
+  if (emu && !emu->source.empty() && !emu->target.empty()) {
+    std::string note = std::string("static emulator: src=") + emu->source +
+                       " dst=" + emu->target;
+    if (!bindRootfsTarget(root, emu->source.c_str(), emu->target, false,
+                          false, true, "bind:emu", true, note.c_str()))
       return false;
   }
   // Do not prebind /proc.

@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <unistd.h>
 
 using namespace actions;
@@ -61,6 +62,7 @@ TEST_CASE("unpack defaults new rootfs trees to rich mapping") {
   CHECK(config.archive == "rootfs.tar");
   CHECK(config.root == "root");
   CHECK_FALSE(config.native);
+  CHECK_FALSE(config.discardDev);
   CHECK(config.idCount == 65535);
   CHECK_FALSE(config.idCountSpecified);
 }
@@ -73,6 +75,20 @@ TEST_CASE("unpack accepts a custom rich ID count") {
   config.parse(args);
   CHECK(config.idCount == 100000);
   CHECK(config.idCountSpecified);
+}
+
+TEST_CASE("discard-dev is an explicit unpack choice only") {
+  ToBeParsedArgs args;
+  args.action_name = "unpack";
+  args.args = {"input.tar", "root", "--discard-dev"};
+  UnpackConfig unpack;
+  unpack.parse(args);
+  CHECK(unpack.discardDev);
+
+  args.action_name = "pack";
+  args.args = {"root", "output.tar", "--discard-dev"};
+  PackConfig pack;
+  REQUIRE_THROWS_AS(pack.parse(args), std::invalid_argument);
 }
 
 TEST_CASE("unpack accepts the maximum mappable rich ID count") {

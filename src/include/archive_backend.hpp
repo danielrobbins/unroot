@@ -4,6 +4,7 @@
 #include <string>
 
 #include "archive_input.hpp"
+#include "archive_devices.hpp"
 #include "injections.hpp"
 #include "util/idmap.hpp"
 
@@ -19,10 +20,12 @@ class Backend {
   int create(const std::filesystem::path& root,
              const util::IdMapPlan& idmap, int outputDescriptor,
              const std::filesystem::path& destination,
-             const injections::ArchivePlan& injections, bool force) const;
+             const injections::ArchivePlan& injections, bool force,
+             const archiveio::DeviceTree& devices = {}) const;
   int extract(const std::filesystem::path& root,
               const util::IdMapPlan& idmap,
-              const archiveio::Input& input, bool force) const;
+              const archiveio::Input& input, bool force,
+              const archiveio::DeviceTree& devices) const;
   int applyLayer(const std::filesystem::path& root,
                  const util::IdMapPlan& idmap,
                  const archiveio::Input& input, bool force) const;

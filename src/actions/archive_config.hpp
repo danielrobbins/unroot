@@ -40,6 +40,7 @@ class UnpackConfig : public ActionConfig {
   std::vector<std::string> disabledInjections;
   std::string rootPrefix;
   bool flatten = false;
+  bool discardDev = false;
   std::string platform;
 
   std::string getActionName() const override { return "unpack"; }

@@ -17,6 +17,7 @@
 #include "archive_fd.hpp"
 #include "archive_exclusions.hpp"
 #include "archive_progress.hpp"
+#include "util/rootfs.hpp"
 
 namespace util {
 
@@ -83,7 +84,8 @@ bool writeData(struct archive* destination, const void* data, size_t size,
 }
 
 int copyData(struct archive* source, struct archive* destination,
-             ArchiveProgress& progress, std::string& message) {
+             ArchiveProgress& progress, std::string& message,
+             struct archive* progressSource = nullptr) {
   static constexpr std::array<char, 64 * 1024> zeros{};
   const void* data = nullptr;
   size_t size = 0;
@@ -104,7 +106,7 @@ int copyData(struct archive* source, struct archive* destination,
     }
     if (!writeData(destination, data, size, message)) return 1;
     position += static_cast<la_int64_t>(size);
-    progress.update(destination);
+    progress.update(progressSource ? progressSource : destination);
   }
   return status == ARCHIVE_EOF ? 0 : archiveFailure(source, message);
 }
@@ -271,6 +273,180 @@ bool layerPath(struct archive_entry* entry, std::vector<std::string>& path,
   }
   return true;
 }
+
+std::string canonicalPath(const char* raw) {
+  std::vector<std::string> parts;
+  if (!safePath(raw, parts)) return {};
+  std::string path;
+  for (const auto& part : parts) {
+    if (!path.empty()) path += '/';
+    path += part;
+  }
+  return path;
+}
+
+// Copy archive entries without materializing them on disk. In particular,
+// device headers require no mknod privilege and keep their original IDs.
+bool copyEntry(struct archive* reader, struct archive* writer,
+               struct archive_entry* entry, ArchiveProgress& progress,
+               std::string& message, bool extracting = false) {
+  return acceptWarning(writer, archive_write_header(writer, entry), false, message) &&
+         copyData(reader, writer, progress, message, extracting ? reader : writer) == 0 &&
+         acceptWarning(writer, archive_write_finish_entry(writer), false, message);
+}
+
+class DeviceArchive {
+ public:
+  explicit DeviceArchive(const archiveio::DeviceTree& options) : options_(options) {}
+
+  bool valid(std::string& message) const {
+    if ((options_.path.empty() && options_.descriptor >= 0) ||
+        (!options_.path.empty() && !validRelativePath(options_.path))) {
+      message = "invalid preserved /dev archive configuration";
+      return false;
+    }
+    return true;
+  }
+
+  bool contains(const std::string& path) const {
+    return !options_.path.empty() &&
+           (path == options_.path || path.rfind(options_.path + "/", 0) == 0);
+  }
+
+  bool checkLink(struct archive_entry* entry, std::string& message) const {
+    if (options_.path.empty()) return true;
+    if (const char* target = archive_entry_hardlink(entry)) {
+      const auto path = canonicalPath(archive_entry_pathname(entry));
+      const auto link = canonicalPath(target);
+      if (link.empty() || contains(path) != contains(link)) {
+        message = "hard link crosses the preserved /dev boundary: " + path;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool begin(std::string& message) {
+    if (!valid(message)) return false;
+    if (options_.descriptor < 0) return true;
+    descriptor_ = reopenArchiveDescriptor(options_.descriptor, O_WRONLY | O_TRUNC, message);
+    if (!descriptor_) return false;
+    writer_.reset(archive_write_new());
+    if (!writer_) { message = "unable to allocate /dev archive writer"; return false; }
+    if (archive_write_set_format_pax(writer_.get()) != ARCHIVE_OK ||
+        archive_write_open_fd(writer_.get(), descriptor_.get()) != ARCHIVE_OK) {
+      archiveFailure(writer_.get(), message);
+      return false;
+    }
+    return true;
+  }
+
+  bool save(struct archive* reader, struct archive_entry* entry,
+            ArchiveProgress& progress, std::string& message) {
+    if (!writer_)
+      return acceptWarning(reader, archive_read_data_skip(reader), false, message);
+    if ((archive_format(reader) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_CPIO &&
+        archive_entry_filetype(entry) == AE_IFREG && archive_entry_nlink(entry) > 1) {
+      const char* target = archive_entry_hardlink(entry);
+      const std::string first = target ? target : archive_entry_pathname(entry);
+      auto pending = cpioLinks_.find(first);
+      // New cpio can put the body on the last link; tar needs it on the first.
+      // Retain only headers until that body arrives, never the file contents.
+      if ((!target && archive_entry_size(entry) == 0) || pending != cpioLinks_.end()) {
+        ArchiveEntry saved(archive_entry_clone(entry), archive_entry_free);
+        if (!saved) { message = "unable to preserve cpio hard link"; return false; }
+        auto& entries = cpioLinks_[first];
+        entries.push_back(std::move(saved));
+        if (archive_entry_size(entry) == 0)
+          return acceptWarning(reader, archive_read_data_skip(reader), false, message);
+        archive_entry_set_size(entries.front().get(), archive_entry_size(entry));
+        if (!copyEntry(reader, writer_.get(), entries.front().get(), progress, message, true) ||
+            !writeCpioLinks(entries, 1, message)) return false;
+        cpioLinks_.erase(first);
+        return true;
+      }
+      if (target) {
+        // Old cpio repeats the body on each link; tar stores it only once.
+        archive_entry_set_size(entry, 0);
+        return writeHeader(entry, message) &&
+               acceptWarning(reader, archive_read_data_skip(reader), false, message);
+      }
+    }
+    return copyEntry(reader, writer_.get(), entry, progress, message, true);
+  }
+
+  bool finish(std::string& message) {
+    // Groups without a body describe empty files (possibly only some links).
+    for (auto& group : cpioLinks_)
+      if (!writeCpioLinks(group.second, 0, message)) return false;
+    cpioLinks_.clear();
+    if (writer_ && !acceptWarning(writer_.get(), archive_write_close(writer_.get()),
+                                  false, message)) return false;
+    if (!options_.path.empty() &&
+        !Rootfs(".").directory("/" + options_.path, true)) {
+      message = "unable to create runtime /dev directory";
+      return false;
+    }
+    return true;
+  }
+
+  bool restore(struct archive* output, const std::vector<std::string>& patterns,
+               ArchiveProgress& progress, bool rootOnly, std::string& message) {
+    if (options_.descriptor < 0) return true;
+    descriptor_ = reopenArchiveDescriptor(options_.descriptor, O_RDONLY, message);
+    if (!descriptor_) return false;
+    ArchiveReader reader(archive_read_new(), archive_read_free);
+    if (!reader) { message = "unable to allocate /dev archive reader"; return false; }
+    archive_read_support_format_tar(reader.get());
+    if (archive_read_open_fd(reader.get(), descriptor_.get(), 10240) != ARCHIVE_OK) {
+      archiveFailure(reader.get(), message);
+      return false;
+    }
+    struct archive_entry* entry = nullptr;
+    int status;
+    while ((status = archive_read_next_header(reader.get(), &entry)) != ARCHIVE_EOF) {
+      if (!acceptWarning(reader.get(), status, false, message)) return false;
+      const auto path = canonicalPath(archive_entry_pathname(entry));
+      if (!contains(path) || !checkLink(entry, message)) {
+        if (message.empty()) message = "preserved /dev archive contains an invalid path";
+        return false;
+      }
+      if (archiveio::excludedByPattern(path, patterns)) continue;
+      if (const char* target = archive_entry_hardlink(entry)) {
+        if (archiveio::excludedByPattern(canonicalPath(target), patterns)) {
+          message = "preserved /dev hard link refers to an excluded path: " + path;
+          return false;
+        }
+      }
+      if (rootOnly && !rootOnlyOwnership(entry)) {
+        message = "--single cannot represent preserved /dev ownership: " + path;
+        return false;
+      }
+      if (!copyEntry(reader.get(), output, entry, progress, message)) return false;
+    }
+    return true;
+  }
+
+ private:
+  bool writeHeader(struct archive_entry* entry, std::string& message) {
+    return acceptWarning(writer_.get(), archive_write_header(writer_.get(), entry), false, message) &&
+           acceptWarning(writer_.get(), archive_write_finish_entry(writer_.get()), false, message);
+  }
+
+  bool writeCpioLinks(std::vector<ArchiveEntry>& entries, size_t begin,
+                      std::string& message) {
+    for (size_t index = begin; index < entries.size(); ++index) {
+      archive_entry_set_size(entries[index].get(), 0);
+      if (!writeHeader(entries[index].get(), message)) return false;
+    }
+    return true;
+  }
+
+  const archiveio::DeviceTree& options_;
+  UniqueFd descriptor_;
+  ArchiveWriter writer_{nullptr, archive_write_free};
+  std::map<std::string, std::vector<ArchiveEntry>> cpioLinks_;
+};
 
 UniqueFd openDirectory(int parent, const std::string& name) {
   return UniqueFd(::openat(parent, name.c_str(),
@@ -479,7 +655,10 @@ bool prepareLayerPath(struct archive_entry* entry, bool& marker, bool& rootDirec
 
 int extractArchive(int descriptor, bool force, bool layer,
                    std::string& message, int progressDescriptor,
-                   ProgressStyle progressStyle) {
+                   ProgressStyle progressStyle,
+                   const archiveio::DeviceTree& devices) {
+  DeviceArchive dev(devices);
+  if (!dev.begin(message)) return 1;
   if (layer && !scanAndApplyWhiteouts(descriptor, message)) return 1;
   UniqueFd input = reopenArchiveDescriptor(descriptor, O_RDONLY, message);
   if (!input) return 1;
@@ -513,10 +692,16 @@ int extractArchive(int descriptor, bool force, bool layer,
   while ((status = archive_read_next_header(reader.get(), &entry)) !=
          ARCHIVE_EOF) {
     if (status == ARCHIVE_RETRY) continue;
+    if (!acceptWarning(reader.get(), status, force, message) ||
+        !dev.checkLink(entry, message)) return 1;
+    if (dev.contains(canonicalPath(archive_entry_pathname(entry)))) {
+      if (!dev.save(reader.get(), entry, progress, message)) return 1;
+      progress.update(reader.get());
+      continue;
+    }
     bool marker = false;
     bool rootDirectory = false;
-    if (!acceptWarning(reader.get(), status, force, message) ||
-        (layer && !prepareLayerPath(entry, marker, rootDirectory, message))) {
+    if (layer && !prepareLayerPath(entry, marker, rootDirectory, message)) {
       archive_read_close(reader.get());
       return 1;
     }
@@ -547,6 +732,7 @@ int extractArchive(int descriptor, bool force, bool layer,
     }
     progress.update(reader.get());
   }
+  if (!dev.finish(message)) return 1;
   if (rootEntry && !acceptWarning(
           reader.get(), archive_read_extract(reader.get(), rootEntry.get(), options),
           force, message)) return 1;
@@ -559,15 +745,17 @@ int extractArchive(int descriptor, bool force, bool layer,
 }  // namespace
 
 int unpackArchive(int descriptor, bool force, std::string& message,
-                   int progressDescriptor, ProgressStyle progressStyle) {
+                   int progressDescriptor, ProgressStyle progressStyle,
+                   const archiveio::DeviceTree& devices) {
   return extractArchive(descriptor, force, false, message,
-                        progressDescriptor, progressStyle);
+                        progressDescriptor, progressStyle, devices);
 }
 
 int applyOciLayer(int descriptor, bool force, std::string& message,
-                  int progressDescriptor, ProgressStyle progressStyle) {
+                  int progressDescriptor, ProgressStyle progressStyle,
+                  const archiveio::DeviceTree& devices) {
   return extractArchive(descriptor, force, true, message,
-                        progressDescriptor, progressStyle);
+                        progressDescriptor, progressStyle, devices);
 }
 
 int packArchive(int descriptor, const std::string& filter,
@@ -576,7 +764,10 @@ int packArchive(int descriptor, const std::string& filter,
                 const std::vector<archiveio::Substitution>& substitutions,
                 bool force, bool rootOnly,
                 std::string& message, int progressDescriptor,
-                ProgressStyle progressStyle) {
+                ProgressStyle progressStyle,
+                const archiveio::DeviceTree& devices) {
+  DeviceArchive dev(devices);
+  if (!dev.valid(message)) return 1;
   UniqueFd output =
       reopenArchiveDescriptor(descriptor, O_WRONLY | O_TRUNC, message);
   if (!output) return 1;
@@ -610,12 +801,18 @@ int packArchive(int descriptor, const std::string& filter,
       return 1;
     }
     const char* name = archive_entry_pathname(entry.get());
+    const auto path = canonicalPath(name);
+    if (dev.contains(path) &&
+        (devices.descriptor >= 0 || path != devices.path)) {
+      archive_entry_clear(entry.get());
+      continue;
+    }
     if (excluded(name, excludes) ||
         archiveio::excludedByPattern(normalized(name), patterns)) {
       archive_entry_clear(entry.get());
       continue;
     }
-    if (archive_read_disk_can_descend(disk.get()))
+    if (!dev.contains(path) && archive_read_disk_can_descend(disk.get()))
       archive_read_disk_descend(disk.get());
     if (!writeEntry(disk.get(), writer.get(), entry.get(),
                     name ? name : "", links, progress, force, rootOnly, message)) {
@@ -627,6 +824,7 @@ int packArchive(int descriptor, const std::string& filter,
     archive_entry_clear(entry.get());
   }
   for (const auto& substitution : substitutions) {
+    if (dev.contains(substitution.destination)) continue;
     if (archiveio::excludedByPattern(substitution.destination, patterns)) continue;
     if (!writeSubstitution(writer.get(), substitution, links, progress, force, rootOnly,
                            message)) {
@@ -635,6 +833,7 @@ int packArchive(int descriptor, const std::string& filter,
       return 1;
     }
   }
+  if (!dev.restore(writer.get(), patterns, progress, rootOnly, message)) return 1;
   const int closeStatus = archive_write_close(writer.get());
   if (!acceptWarning(writer.get(), closeStatus, force, message)) {
     const int result = 1;

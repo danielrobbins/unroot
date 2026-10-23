@@ -336,6 +336,14 @@ RootLayoutResult resolveRootLayout(const fs::path& rootfs) {
   if (!available) return {std::move(layout), {}};
   try {
     const auto value = nlohmann::json::parse(content);
+    if (value.contains("dev_policy")) {
+      if (value["dev_policy"] == "preserve")
+        layout.devPolicy = DevPolicy::Preserve;
+      else if (value["dev_policy"] == "discard")
+        layout.devPolicy = DevPolicy::Discard;
+      else
+        return {{}, "rootfs metadata has an invalid /dev policy"};
+    }
     if (!value.contains("layout")) return {std::move(layout), {}};
     const auto& stored = value["layout"];
     if (!stored.is_object() || !stored.contains("root_prefix") ||
@@ -355,6 +363,20 @@ RootLayoutResult resolveRootLayout(const fs::path& rootfs) {
                     layout.rootPrefix};
   layout.effectiveRoot = layout.managedRoot / layout.rootPrefix;
   return {std::move(layout), {}};
+}
+
+bool setDevPolicy(const fs::path& rootfs, bool preserve, std::string& error) {
+  auto value = loadMetaJson(rootfs);
+  if (!value.is_object() || value.empty()) {
+    error = "rootfs metadata is unavailable";
+    return false;
+  }
+  value["dev_policy"] = preserve ? "preserve" : "discard";
+  if (!atomicSaveMetaJson(rootfs, value)) {
+    error = "unable to record the /dev policy";
+    return false;
+  }
+  return true;
 }
 
 bool setRootPrefix(const fs::path& rootfs, const std::string& prefix,

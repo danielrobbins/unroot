@@ -106,7 +106,7 @@ $ unroot pack \(ti/rootfs alpine\-modified.tar.zst
 The archive is host\-independent, while its binaries retain the rootfs's target architecture. On another supported Linux host, \fBunroot\fR either runs them natively or selects the matching QEMU emulator.
 .SH ROOTFS ARCHIVES
 .PP
-Unroot supports raw root filesystem tar archives. Filesystem entries such as \fBbin/\fR, \fBetc/\fR, \fBusr/\fR, and \fBvar/\fR normally appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Use \fB\-\-root\-prefix PATH\fR when the effective rootfs is beneath one or more wrapper directories. OCI/container\-image layouts require the separate explicit flattening workflow; disk images, installer media, and distribution\-specific bundles are not raw rootfs archives.
+Unroot can unpack raw root filesystem archives in tar or cpio format. Libarchive detects the input format automatically; no external \fBtar\fR or \fBcpio\fR command is required. \fBpack\fR always produces a tar archive, regardless of the input format. Filesystem entries such as \fBbin/\fR, \fBetc/\fR, \fBusr/\fR, and \fBvar/\fR normally appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Use \fB\-\-root\-prefix PATH\fR when the effective rootfs is beneath one or more wrapper directories. OCI/container\-image layouts require the separate explicit flattening workflow; disk images, installer media, and distribution\-specific bundles are not raw rootfs archives.
 .PP
 For example, an archive containing \fBraspi\-image/rootfs/bin/\fR, \fBraspi\-image/rootfs/etc/\fR, and wrapper files outside \fBrootfs/\fR can be imported with \fBunroot unpack \-\-root\-prefix raspi\-image/rootfs image.tar \(ti/roots/raspi\fR\&. Unroot extracts the complete archive, records the selected relative directory, and uses it as \fB/\fR for entry, architecture detection, emulation, and injections. \fBpack\fR preserves the complete wrapper layout rather than silently discarding neighboring files.
 .PP
@@ -118,7 +118,13 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 .PP
 After extraction, \fBunpack\fR installs writable copies of the host's \fB/etc/hosts\fR and \fB/etc/resolv.conf\fR, plus an \fB/etc/mtab\fR link to \fB/proc/self/mounts\fR, by default. Their portable rootfs originals are preserved for later restoration and packing. See \fIROOTFS INJECTIONS\fR for the complete lifecycle and for \fB\-\-inject\fR controls that disable any default.
 .PP
+\fIUnpacking /dev:\fR For both rich and native roots, the archive's original \fB/dev\fR subtree is saved in \fBROOT/.unroot/dev.tar\fR rather than extracted into the working filesystem. This preserves device nodes, ordinary files, links, and their metadata without requiring permission to create devices. The saved subtree is an archive snapshot, not an editable or active device tree. \fBenter\fR supplies a separate, temporary \fB/dev\fR with Unroot's minimal devices, terminals, and standard links; changes there disappear when the session ends. Outside an entered session, the working \fB/dev\fR directory is empty unless another program changes it. Other chroot tools must provide their own runtime devices.
+.PP
+Use \fBunroot unpack \-\-discard\-dev ARCHIVE ROOT\fR to discard the original \fB/dev\fR contents instead of saving them. This choice is recorded for later packing and does not change the devices provided by \fBenter\fR\&. With \fB\-\-root\-prefix\fR, this policy applies only to \fB/dev\fR within the selected rootfs, not similarly named directories elsewhere in the archive. Hard links between the saved \fB/dev\fR subtree and the rest of the rootfs are currently rejected rather than broken silently.
+.PP
 \fBunroot pack\fR validates the managed rootfs's recorded ownership model before capture. For an unmanaged, single\-owner build tree, use \fBunroot pack \-\-single ROOT ARCHIVE\fR: the invoking UID and GID become archive ID 0, without changing ownership on disk or requiring subordinate IDs. Files and POSIX ACL entries that cannot be represented by that mapping cause packing to fail, even with \fB\-\-force\fR\&. This option cannot override a recorded rich or native ownership map.
+.PP
+\fIPacking /dev:\fR For roots unpacked with preservation enabled, \fBpack\fR restores the saved \fB/dev\fR subtree to its original paths in the output archive. Registered exclusions also apply to these saved entries. The snapshot takes precedence over the working \fB/dev\fR; neither runtime devices nor subsequent files placed in that directory replace the saved originals. Keep \fB\&.unroot\fR with the working rootfs: a missing or unreadable required sidecar stops packing, even with \fB\-\-force\fR\&. For roots unpacked with \fB\-\-discard\-dev\fR or imported from OCI, \fBpack\fR includes the \fB/dev\fR directory without its contents. Roots created before this policy, or outside Unroot, have no sidecar requirement: \fBenter\fR temporarily covers their existing \fB/dev\fR without changing its contents, and \fBpack\fR preserves the underlying contents normally. Unroot does not automatically migrate or clean up those older device trees.
 .PP
 Archive operations use the sibling \fBunroot\-util\fR linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with \fIROOT\fR as its working directory, but is not chrooted, so no shell or archive tool is required inside \fIROOT\fR\&. Destination suffixes select compression filters such as \fB\&.gz\fR, \fB\&.xz\fR, and \fB\&.zst\fR when supported by the host libarchive.
 .PP
@@ -156,6 +162,8 @@ Use \fB\-\-platform linux/ARCH\fR or \fB\-\-platform linux/ARCH/VARIANT\fR to se
 The result records a random root identity, selected platform, manifest and config digests, layer digests and \fBdiff_ids\fR, and selected runtime config fields in \fB\&.unroot/meta.json\fR\&. Runtime fields such as \fBEntrypoint\fR, \fBCmd\fR, \fBEnv\fR, and \fBUser\fR are provenance only and do not silently alter Unroot command or environment policy.
 .PP
 Initial OCI import uses a private temporary content store and removes it when the operation finishes. Original OCI blobs and layer boundaries are not retained. A later \fBunroot pack ROOT ARCHIVE\fR therefore emits a normal flat rootfs archive, not an OCI image.
+.PP
+OCI import discards the image's \fB/dev\fR contents and records that choice for later packing. No \fB/dev\fR sidecar is created. As with regular rootfs archives, \fBenter\fR provides Unroot's temporary runtime devices.
 .SH INSPECTION
 .PP
 \fBunroot inspect host\fR reports current kernel, namespace, mapping\-helper, host\-helper, and archive\-engine capabilities without changing a rootfs. Availability, confirmed unavailability, and an inconclusive probe are reported separately. Use \fB\-\-json\fR for a structured support report.
@@ -351,6 +359,9 @@ Import an OCI image\-layout archive by applying its ordered layers to a normal m
 .TP
 \fB\-\-cwd DIRECTORY\fR
 Set the command's working directory inside \fIROOT\fR\&.
+.TP
+\fB\-\-discard\-dev\fR
+Discard the input archive's \fB/dev\fR subtree instead of preserving it for later packing. \fBenter\fR still supplies temporary runtime devices, and \fBpack\fR includes an empty \fB/dev\fR directory. With \fB\-\-root\-prefix\fR, this applies only within the selected rootfs. OCI imports already discard \fB/dev\fR\&.
 .TP
 \fB\-\-env KEY=VALUE\fR
 Set an environment variable for the target command. May be repeated.

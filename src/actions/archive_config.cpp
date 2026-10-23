@@ -72,6 +72,9 @@ void UnpackConfig::configure_parser() {
   ActionConfig::configure_parser();
   parser_
       .add_flag_meta(
+          {"--discard-dev"}, "Discard the archive's original /dev contents",
+          [this]() { discardDev = true; })
+      .add_flag_meta(
           {"--native"},
           "Preserve host-native ownership instead of using subordinate IDs",
           [this]() { native = true; })

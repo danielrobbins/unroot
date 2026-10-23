@@ -64,7 +64,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            acl build-essential libarchive-dev libsubid-dev python3-pytest
+            acl build-essential cpio libarchive-dev libsubid-dev python3-pytest
           if [[ "${{ matrix.userns }}" == "enabled" ]]; then
             sudo apt-get install -y busybox-static qemu-user-static skopeo uidmap ${{ matrix.cross_package }}
           fi
@@ -199,12 +199,15 @@ jobs:
               -k restricted_system_paths
       - name: Run with nested namespaces enabled
         run: |
+          # Setuid map helpers need authority over a namespace owned by the
+          # non-root test user. Keep this out of the restricted-policy runs.
           docker run --rm \
+            --cap-add SYS_ADMIN \
             --security-opt apparmor=unconfined \
             --security-opt seccomp=unconfined \
             --security-opt systempaths=unconfined \
             --env UNROOT_E2E_STRICT=1 \
-            --env UNROOT_E2E_REQUIRE=private_binfmt \
+            --env UNROOT_E2E_REQUIRE=private_binfmt,rich_idmap \
             --env UNROOT_E2E_REPORT=/reports/nested-namespaces.json \
             --volume "${PWD}/e2e-docker:/reports" \
             unroot-e2e \

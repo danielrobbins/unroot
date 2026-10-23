@@ -99,13 +99,15 @@ def test_missing_built_helper_is_a_failure(tmp_path):
     "unshare: unshare failed: Operation not permitted",
     "unshare: unshare failed: Permission denied",
     "unshare: unshare failed: No space left on device",
+    "newuidmap: write to uid_map failed: Operation not permitted",
+    "newgidmap: write to gid_map failed: Operation not permitted",
 ])
 def test_known_namespace_restriction_can_skip(monkeypatch, message):
     monkeypatch.setattr(support.shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(support, "run_command", lambda _: CommandResult(
         ("unshare",), 1, "", message
     ))
-    assert message in support.rich_namespace_unavailable()
+    assert message in support.rich_namespace_unavailable((100000, 200000), 65535)
 
 
 def test_unexpected_namespace_probe_failure_is_not_a_skip(monkeypatch):
@@ -114,7 +116,20 @@ def test_unexpected_namespace_probe_failure_is_not_a_skip(monkeypatch):
         ("unshare",), 1, "", "unrecognized option"
     ))
     with pytest.raises(AssertionError, match="unrecognized option"):
-        support.rich_namespace_unavailable()
+        support.rich_namespace_unavailable((100000, 200000), 65535)
+
+
+def test_namespace_probe_exercises_the_allocated_rich_map(monkeypatch):
+    monkeypatch.setattr(support.shutil, "which", lambda name: "/usr/bin/" + name)
+    calls = []
+    def run(command):
+        calls.append(command)
+        return CommandResult(tuple(command), 0, "", "")
+    monkeypatch.setattr(support, "run_command", run)
+    assert support.rich_namespace_unavailable((100000, 200000), 42) == ""
+    assert "--map-users=100000,0,42" in calls[0]
+    assert "--map-groups=200000,0,42" in calls[0]
+    assert "--map-root-user" not in calls[0]
 
 
 def test_qualification_is_reused_and_supports_custom_id_counts(monkeypatch):
@@ -123,7 +138,7 @@ def test_qualification_is_reused_and_supports_custom_id_counts(monkeypatch):
         calls.append(count)
         return (100000, 200000), ""
     monkeypatch.setattr(conftest, "rich_idmap_allocation", allocation)
-    monkeypatch.setattr(conftest, "rich_namespace_unavailable", lambda: "")
+    monkeypatch.setattr(conftest, "rich_namespace_unavailable", lambda allocation, count: "")
     require = conftest.require_rich_idmap.__wrapped__(
         Path("/bin/unroot"), conftest.require_capability.__wrapped__(False, set())
     )
