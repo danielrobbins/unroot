@@ -207,6 +207,76 @@ def _working_layers() -> list[tuple[bytes, str]]:
     return [(base, OCI_LAYER), (update, OCI_LAYER_GZIP)]
 
 
+@pytest.mark.parametrize("layout", ["raw", "prefixed", "oci", "oci-add", "oci-remove"])
+@pytest.mark.parametrize("disabled", [False, True])
+def test_default_injections_follow_the_extracted_directory_layout(
+    unroot: UnrootRunner, tmp_path: Path, require_rich_idmap,
+    layout: str, disabled: bool,
+) -> None:
+    if os.geteuid() != 0:
+        require_rich_idmap()
+    image = tmp_path / "image.tar"
+    options = list(_ownership_arguments())
+    prefix = "bundle/rootfs/" if layout == "prefixed" else ""
+    base = _layer([(prefix or ".", None, "dir"), (prefix + "payload", b"ok", "file")])
+    if layout.startswith("oci"):
+        layers = [(base, OCI_LAYER)]
+        if layout != "oci":
+            layers.append((_layer([("etc", None, "dir")]), OCI_LAYER))
+        if layout == "oci-remove":
+            layers.append((_layer([(".wh.etc", b"", "file")]), OCI_LAYER))
+        _oci_archive(image, layers)
+        options.append("--flatten")
+    else:
+        image.write_bytes(base)
+    if prefix:
+        options.extend(["--root-prefix", prefix.rstrip("/")])
+    if disabled:
+        options.append("--inject=-*")
+    root = tmp_path / "root"
+    result = unroot.run("unpack", *options, str(image), str(root)).assert_ok()
+    effective = root / prefix
+    has_etc = layout == "oci-add"
+    assert (effective / "etc").exists() == has_etc
+    assert (effective / "payload").read_bytes() == b"ok"
+    listed = unroot.run("inject", "list", "--json", str(root)).assert_ok()
+    entries = json.loads(listed.stdout)["entries"]
+    expected = {"hosts", "resolv.conf", "mtab"} if has_etc and not disabled else set()
+    assert {entry["name"] for entry in entries} == expected
+    assert ("skipping default injection" in result.stderr) == (not has_etc and not disabled)
+    if not has_etc:
+        assert not (root / ".unroot/injections/registry.json").exists()
+        explicit = unroot.run("inject", "add", str(root), "hosts")
+        assert explicit.returncode != 0
+        assert "destination directory does not exist" in explicit.stderr
+        (effective / "etc").mkdir()
+        unroot.run("inject", "add", str(root), "hosts").assert_ok()
+        unroot.run("inject", "clear", str(root)).assert_ok()
+        (effective / "etc").rmdir()
+    packed = tmp_path / "packed.tar"
+    unroot.run("pack", str(root), str(packed)).assert_ok()
+    with tarfile.open(packed) as archive:
+        names = {name.removeprefix("./").rstrip("/") for name in archive.getnames()}
+    assert (prefix + "etc" in names) == has_etc
+    assert prefix + "etc/hosts" not in names
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_default_injections_do_not_skip_invalid_parents(
+    unroot: UnrootRunner, tmp_path: Path, require_rich_idmap, kind: str,
+) -> None:
+    if os.geteuid() != 0:
+        require_rich_idmap()
+    image = tmp_path / "image.tar"
+    image.write_bytes(_layer([("etc", b"missing", kind)]))
+    result = unroot.run(
+        "unpack", *_ownership_arguments(), str(image), str(tmp_path / "root")
+    )
+    assert result.returncode != 0
+    assert "skipping default injection" not in result.stderr
+    assert "destination directory does not exist" in result.stderr
+
+
 def test_flatten_import_applies_ordered_layers_and_records_provenance(
     unroot: UnrootRunner,
     tmp_path: Path,

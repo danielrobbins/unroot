@@ -39,6 +39,7 @@ TEST_CASE("injection specs accept builtins and typed file mappings") {
   CHECK(builtin.name == "hosts");
   CHECK(builtin.source == "/etc/hosts");
   CHECK(builtin.destination == "/etc/hosts");
+  CHECK_FALSE(builtin.skipMissingParent);
 
   injections::Spec mtab;
   REQUIRE(injections::parseSpec("mtab", mtab, error));
@@ -47,6 +48,7 @@ TEST_CASE("injection specs accept builtins and typed file mappings") {
   CHECK(mtab.target == "/proc/self/mounts");
   CHECK(mtab.destination == "/etc/mtab");
   CHECK(mtab.mode == 0777);
+  CHECK_FALSE(mtab.skipMissingParent);
 
   injections::Spec custom;
   REQUIRE(injections::parseSpec(
@@ -57,6 +59,28 @@ TEST_CASE("injection specs accept builtins and typed file mappings") {
   CHECK(custom.uid == 12);
   CHECK(custom.gid == 34);
   CHECK(custom.mode == 0600);
+  CHECK_FALSE(custom.skipMissingParent);
+}
+
+TEST_CASE("unpack defaults skip missing destination parents without creating them") {
+  for (const std::string prefix : {"", "bundle/rootfs"}) {
+    InjectionTree tree;
+    auto layout = flatLayout(tree.root);
+    layout.rootPrefix = prefix;
+    layout.effectiveRoot = prefix.empty() ? tree.root : tree.root / prefix;
+    std::filesystem::create_directories(layout.effectiveRoot);
+    util::IdMapPlan map;
+    map.mode = util::IdMapMode::Native;
+    auto specs = injections::defaults();
+    // Absent destination parents need neither a host source nor a helper.
+    for (auto& spec : specs) spec.source = "/nonexistent-injection-source";
+    std::string error;
+
+    REQUIRE(injections::add(layout, map, std::move(specs), error));
+    CHECK_FALSE(std::filesystem::exists(layout.effectiveRoot / "etc"));
+    CHECK_FALSE(std::filesystem::exists(
+        tree.root / ".unroot/injections/registry.json"));
+  }
 }
 
 TEST_CASE("injection specs reject malformed paths and attributes") {
