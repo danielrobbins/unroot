@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstring>
 #include <ctime>
 #include <climits>
 #include <fcntl.h>
@@ -200,8 +201,18 @@ nlohmann::json loadMetaJson(const fs::path& rootfs) {
 }
 
 IdMapMetaResult readIdMap(const fs::path& rootfs) {
-  auto [available, content] = readMeta(rootfs);
-  return available ? parseIdMapMeta(content) : IdMapMetaResult{};
+  util::Rootfs root(rootfs.string());
+  if (!root)
+    return {false, false, {},
+            "unable to open rootfs to read ownership metadata: " +
+                std::string(std::strerror(errno))};
+  std::string content;
+  if (root.readText(MetaPath, content)) return parseIdMapMeta(content);
+  const int error = errno;
+  if (error == ENOENT) return {};
+  return {false, false, {},
+          "unable to read rootfs ownership metadata: " +
+              std::string(std::strerror(error))};
 }
 
 IdMapMetaResult initializeIdMap(const fs::path& rootfs,
