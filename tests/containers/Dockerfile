@@ -7,6 +7,7 @@ RUN apt-get update \
         acl \
         build-essential \
         busybox-static \
+        cpio \
         libarchive-dev \
         libsubid-dev \
         python3-pytest \

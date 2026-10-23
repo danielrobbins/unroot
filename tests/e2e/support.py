@@ -265,19 +265,24 @@ def rich_idmap_allocation(
     return (uid, gid), ""
 
 
-def rich_namespace_unavailable() -> str:
+def rich_namespace_unavailable(allocation: Tuple[int, int], count: int) -> str:
     for command in ("newuidmap", "newgidmap", "unshare"):
         if shutil.which(command) is None:
             return f"rich-ID test qualification requires {command}"
-    # Probe kernel policy independently of Unroot's extraction and entry code.
+    # A single-ID mapping does not exercise the privileged map helpers.
+    # Comma-separated extents also work with older util-linux releases.
+    uid, gid = allocation
     result = run_command([
-        "env", "LC_ALL=C", "unshare", "--user", "--map-root-user",
+        "env", "LC_ALL=C", "unshare", "--user",
+        f"--map-users={uid},0,{count}", f"--map-groups={gid},0,{count}",
         "--mount", "--pid", "--fork", "/bin/true",
     ])
     restricted = {
         "unshare: unshare failed: Operation not permitted",
         "unshare: unshare failed: Permission denied",
         "unshare: unshare failed: No space left on device",
+        "newuidmap: write to uid_map failed: Operation not permitted",
+        "newgidmap: write to gid_map failed: Operation not permitted",
     }
     if result.returncode == 1 and result.stderr.strip() in restricted:
         return "host namespace policy prevents the test: " + result.stderr.strip()

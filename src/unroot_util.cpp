@@ -33,6 +33,7 @@ void usage() {
                  "       unroot-util archive stage-oci --fd FD\n"
                  "       unroot-util archive decompress --fd FD --output-fd FD --filter FILTER\n"
                  "       unroot-util archive pack --fd FD --filter FILTER [--progress-fd FD --progress-style STYLE]\n"
+                 "       archive unpack/apply-layer/pack: [--dev-path PATH [--dev-fd FD]]\n"
                  "       unroot-util filesystem inspect --fd FD\n"
                  "       unroot-util injection install ...\n"
                  "       unroot-util injection restore ...\n"
@@ -89,6 +90,21 @@ int filesystemCommand(int argc, char** argv) {
     return 0;
 }
 
+bool deviceArgument(const std::string& option, const std::string& value,
+                    archiveio::DeviceTree& devices) {
+    if (option == "--dev-path" && devices.path.empty() && !value.empty()) {
+        devices.path = value;
+        return true;
+    }
+    unsigned int descriptor;
+    if (option == "--dev-fd" && devices.descriptor < 0 &&
+        parseId(value.c_str(), descriptor) && descriptor <= INT_MAX) {
+        devices.descriptor = static_cast<int>(descriptor);
+        return true;
+    }
+    return false;
+}
+
 int archiveCommand(int argc, char** argv) {
     if (!std::setlocale(LC_CTYPE, "C.UTF-8"))
         std::setlocale(LC_CTYPE, "C.utf8");
@@ -135,6 +151,7 @@ int archiveCommand(int argc, char** argv) {
         std::string(argv[3]) == "--fd" && parseId(argv[4], descriptor) &&
         descriptor <= INT_MAX) {
         bool force = false;
+        archiveio::DeviceTree devices;
         std::string rootPrefix;
         bool ociLayer = false;
         ProgressArguments progress;
@@ -153,6 +170,11 @@ int archiveCommand(int argc, char** argv) {
             if (operation == "inspect" && option == "--oci-layer" &&
                 !ociLayer) {
                 ociLayer = true;
+                continue;
+            }
+            if (operation != "inspect" && index < argc &&
+                deviceArgument(option, argv[index], devices)) {
+                ++index;
                 continue;
             }
             if (index >= argc || !progress.consume(option, argv[index++])) {
@@ -180,10 +202,10 @@ int archiveCommand(int argc, char** argv) {
         const int result = operation == "apply-layer"
             ? util::applyOciLayer(static_cast<int>(descriptor), force, error,
                                   progress.descriptor,
-                                  progress.selectedStyle())
+                                  progress.selectedStyle(), devices)
             : util::unpackArchive(static_cast<int>(descriptor), force, error,
                                   progress.descriptor,
-                                  progress.selectedStyle());
+                                  progress.selectedStyle(), devices);
         if (!error.empty())
             std::cerr << (result == 0 ? "Warning: " : "") << error << '\n';
         return result;
@@ -193,6 +215,7 @@ int archiveCommand(int argc, char** argv) {
         descriptor <= INT_MAX && std::string(argv[5]) == "--filter") {
         bool packForce = false;
         bool rootOnly = false;
+        archiveio::DeviceTree devices;
         ProgressArguments progress;
         std::vector<std::string> excludes;
         std::vector<std::string> patterns;
@@ -216,7 +239,9 @@ int archiveCommand(int argc, char** argv) {
                 return 2;
             }
             const std::string value = argv[index++];
-            if (option == "--progress-fd" || option == "--progress-style") {
+            if (deviceArgument(option, value, devices)) {
+                continue;
+            } else if (option == "--progress-fd" || option == "--progress-style") {
                 if (!progress.consume(option, value.c_str())) {
                     usage();
                     return 2;
@@ -248,7 +273,7 @@ int archiveCommand(int argc, char** argv) {
                                              argv[6], excludes, patterns, substitutions,
                                              packForce, rootOnly, error,
                                              progress.descriptor,
-                                             progress.selectedStyle());
+                                             progress.selectedStyle(), devices);
         if (!error.empty())
             std::cerr << (result == 0 ? "Warning: " : "") << error << '\n';
         return result;

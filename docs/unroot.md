@@ -96,7 +96,7 @@ The archive is host-independent, while its binaries retain the rootfs's target a
 
 ## ROOTFS ARCHIVES
 
-Unroot supports raw root filesystem tar archives. Filesystem entries such as `bin/`, `etc/`, `usr/`, and `var/` normally appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Use `--root-prefix PATH` when the effective rootfs is beneath one or more wrapper directories. OCI/container-image layouts require the separate explicit flattening workflow; disk images, installer media, and distribution-specific bundles are not raw rootfs archives.
+Unroot can unpack raw root filesystem archives in tar or cpio format. Libarchive detects the input format automatically; no external `tar` or `cpio` command is required. `pack` always produces a tar archive, regardless of the input format. Filesystem entries such as `bin/`, `etc/`, `usr/`, and `var/` normally appear directly at the archive root; Gentoo and Funtoo stage tarballs are common examples. Use `--root-prefix PATH` when the effective rootfs is beneath one or more wrapper directories. OCI/container-image layouts require the separate explicit flattening workflow; disk images, installer media, and distribution-specific bundles are not raw rootfs archives.
 
 For example, an archive containing `raspi-image/rootfs/bin/`, `raspi-image/rootfs/etc/`, and wrapper files outside `rootfs/` can be imported with `unroot unpack --root-prefix raspi-image/rootfs image.tar ~/roots/raspi`. Unroot extracts the complete archive, records the selected relative directory, and uses it as `/` for entry, architecture detection, emulation, and injections. `pack` preserves the complete wrapper layout rather than silently discarding neighboring files.
 
@@ -108,7 +108,13 @@ Both forms write the selected mode and, for rich roots, the exact kernel UID and
 
 After extraction, `unpack` installs writable copies of the host's `/etc/hosts` and `/etc/resolv.conf`, plus an `/etc/mtab` link to `/proc/self/mounts`, by default. Their portable rootfs originals are preserved for later restoration and packing. See *ROOTFS INJECTIONS* for the complete lifecycle and for `--inject` controls that disable any default.
 
+*Unpacking /dev:* For both rich and native roots, the archive's original `/dev` subtree is saved in `ROOT/.unroot/dev.tar` rather than extracted into the working filesystem. This preserves device nodes, ordinary files, links, and their metadata without requiring permission to create devices. The saved subtree is an archive snapshot, not an editable or active device tree. `enter` supplies a separate, temporary `/dev` with Unroot's minimal devices, terminals, and standard links; changes there disappear when the session ends. Outside an entered session, the working `/dev` directory is empty unless another program changes it. Other chroot tools must provide their own runtime devices.
+
+Use `unroot unpack --discard-dev ARCHIVE ROOT` to discard the original `/dev` contents instead of saving them. This choice is recorded for later packing and does not change the devices provided by `enter`. With `--root-prefix`, this policy applies only to `/dev` within the selected rootfs, not similarly named directories elsewhere in the archive. Hard links between the saved `/dev` subtree and the rest of the rootfs are currently rejected rather than broken silently.
+
 `unroot pack` validates the managed rootfs's recorded ownership model before capture. For an unmanaged, single-owner build tree, use `unroot pack --single ROOT ARCHIVE`: the invoking UID and GID become archive ID 0, without changing ownership on disk or requiring subordinate IDs. Files and POSIX ACL entries that cannot be represented by that mapping cause packing to fail, even with `--force`. This option cannot override a recorded rich or native ownership map.
+
+*Packing /dev:* For roots unpacked with preservation enabled, `pack` restores the saved `/dev` subtree to its original paths in the output archive. Registered exclusions also apply to these saved entries. The snapshot takes precedence over the working `/dev`; neither runtime devices nor subsequent files placed in that directory replace the saved originals. Keep `.unroot` with the working rootfs: a missing or unreadable required sidecar stops packing, even with `--force`. For roots unpacked with `--discard-dev` or imported from OCI, `pack` includes the `/dev` directory without its contents. Roots created before this policy, or outside Unroot, have no sidecar requirement: `enter` temporarily covers their existing `/dev` without changing its contents, and `pack` preserves the underlying contents normally. Unroot does not automatically migrate or clean up those older device trees.
 
 Archive operations use the sibling `unroot-util` linked to the host's libarchive. The helper runs inside Unroot's selected namespaces with *ROOT* as its working directory, but is not chrooted, so no shell or archive tool is required inside *ROOT*. Destination suffixes select compression filters such as `.gz`, `.xz`, and `.zst` when supported by the host libarchive.
 
@@ -146,6 +152,8 @@ Use `--platform linux/ARCH` or `--platform linux/ARCH/VARIANT` to select from a 
 The result records a random root identity, selected platform, manifest and config digests, layer digests and `diff_ids`, and selected runtime config fields in `.unroot/meta.json`. Runtime fields such as `Entrypoint`, `Cmd`, `Env`, and `User` are provenance only and do not silently alter Unroot command or environment policy.
 
 Initial OCI import uses a private temporary content store and removes it when the operation finishes. Original OCI blobs and layer boundaries are not retained. A later `unroot pack ROOT ARCHIVE` therefore emits a normal flat rootfs archive, not an OCI image.
+
+OCI import discards the image's `/dev` contents and records that choice for later packing. No `/dev` sidecar is created. As with regular rootfs archives, `enter` provides Unroot's temporary runtime devices.
 
 ## INSPECTION
 
@@ -353,6 +361,10 @@ Import an OCI image-layout archive by applying its ordered layers to a normal ma
 ### --cwd DIRECTORY
 
 Set the command's working directory inside *ROOT*.
+
+### --discard-dev
+
+Discard the input archive's `/dev` subtree instead of preserving it for later packing. `enter` still supplies temporary runtime devices, and `pack` includes an empty `/dev` directory. With `--root-prefix`, this applies only within the selected rootfs. OCI imports already discard `/dev`.
 
 ### --env KEY=VALUE
 

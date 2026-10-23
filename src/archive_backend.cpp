@@ -63,6 +63,14 @@ UniqueFd childDescriptor(int descriptor) {
   return UniqueFd(::fcntl(descriptor, F_DUPFD, STDERR_FILENO + 1));
 }
 
+void deviceArguments(std::vector<std::string>& arguments,
+                     const archiveio::DeviceTree& devices, int descriptor) {
+  if (devices.path.empty()) return;
+  arguments.insert(arguments.end(), {"--dev-path", devices.path});
+  if (descriptor >= 0)
+    arguments.insert(arguments.end(), {"--dev-fd", std::to_string(descriptor)});
+}
+
 std::string helperError(util::HostHelperResult result,
                         const std::string& fallback) {
   if (!result.error.empty()) return std::move(result.error);
@@ -83,12 +91,16 @@ Backend::Backend() : helper_(util::siblingHostHelper()) {
 int Backend::create(const fs::path& root, const util::IdMapPlan& idmap,
                     int outputDescriptor, const fs::path& destination,
                     const injections::ArchivePlan& injections,
-                    bool force) const {
+                    bool force, const archiveio::DeviceTree& devices) const {
   UniqueFd output = childDescriptor(outputDescriptor);
   if (!output) return -1;
+  UniqueFd dev(devices.descriptor >= 0 ? childDescriptor(devices.descriptor)
+                                      : UniqueFd{});
+  if (devices.descriptor >= 0 && !dev) return -1;
   std::vector<std::string> arguments{
       helper_, "archive", "pack", "--fd", std::to_string(output.get()),
       "--filter", compressionFilter(destination)};
+  deviceArguments(arguments, devices, dev.get());
   if (idmap.mode == util::IdMapMode::Single)
     arguments.push_back("--root-only");
   for (const auto& path : injections.excludes) {
@@ -110,11 +122,16 @@ int Backend::create(const fs::path& root, const util::IdMapPlan& idmap,
 }
 
 int Backend::extract(const fs::path& root, const util::IdMapPlan& idmap,
-                     const archiveio::Input& input, bool force) const {
+                     const archiveio::Input& input, bool force,
+                     const archiveio::DeviceTree& devices) const {
   UniqueFd archive = input.duplicateForChild();
   if (!archive) return -1;
+  UniqueFd dev(devices.descriptor >= 0 ? childDescriptor(devices.descriptor)
+                                      : UniqueFd{});
+  if (devices.descriptor >= 0 && !dev) return -1;
   std::vector<std::string> arguments{
       helper_, "archive", "unpack", "--fd", std::to_string(archive.get())};
+  deviceArguments(arguments, devices, dev.get());
   if (force) arguments.push_back("--force");
   util::ProgressOutput progress;
   progress.appendTo(arguments);
@@ -127,7 +144,7 @@ int Backend::applyLayer(const fs::path& root, const util::IdMapPlan& idmap,
   if (!archive) return -1;
   std::vector<std::string> arguments{
       helper_, "archive", "apply-layer", "--fd",
-      std::to_string(archive.get())};
+      std::to_string(archive.get()), "--dev-path", "dev"};
   if (force) arguments.push_back("--force");
   util::ProgressOutput progress;
   progress.appendTo(arguments);

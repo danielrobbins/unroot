@@ -174,6 +174,7 @@ ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
                            progressStyle, archiveDescriptorSize(input.get()));
   archiveinfo::ArchiveReport report;
   report.rootPrefix = rootPrefix;
+  const std::string devPath = rootPrefix.empty() ? "dev" : rootPrefix + "/dev";
   struct archive_entry* entry = nullptr;
   int status = ARCHIVE_OK;
   while ((status = archive_read_next_header(reader.get(), &entry)) ==
@@ -202,6 +203,18 @@ ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
     if (gid >= 0)
       report.maxGid =
           std::max(report.maxGid, static_cast<uint64_t>(gid));
+    // The engine preserves or discards this subtree instead of extracting it.
+    if (path.value != devPath && path.value.rfind(devPath + "/", 0) != 0) {
+      auto& requirements = report.outsideDev;
+      if (uid >= 0)
+        requirements.maxUid = std::max(requirements.maxUid, static_cast<uint64_t>(uid));
+      if (gid >= 0)
+        requirements.maxGid = std::max(requirements.maxGid, static_cast<uint64_t>(gid));
+      requirements.posixAcl |=
+          archive_entry_acl_count(entry, ARCHIVE_ENTRY_ACL_TYPE_ACCESS) > 3 ||
+          archive_entry_acl_count(entry, ARCHIVE_ENTRY_ACL_TYPE_DEFAULT) > 0;
+      requirements.xattr |= archive_entry_xattr_count(entry) > 0;
+    }
     if (archive_entry_filetype(entry) == AE_IFREG &&
         archive_entry_size_is_set(entry)) {
       const auto size = archive_entry_size(entry);

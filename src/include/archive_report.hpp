@@ -16,6 +16,13 @@ struct Finding {
   std::vector<std::string> examples;
 };
 
+struct ExtractionRequirements {
+  uint64_t maxUid = 0;
+  uint64_t maxGid = 0;
+  bool posixAcl = false;
+  bool xattr = false;
+};
+
 struct ArchiveReport {
   std::string format;
   std::vector<std::string> filters;
@@ -23,6 +30,7 @@ struct ArchiveReport {
   uint64_t regularBytes = 0;
   uint64_t maxUid = 0;
   uint64_t maxGid = 0;
+  ExtractionRequirements outsideDev;
   bool reservedMetadata = false;
   bool ociLayout = false;
   std::string rootPrefix;

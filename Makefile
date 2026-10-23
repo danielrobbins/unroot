@@ -672,7 +672,7 @@ $(BIN_DIR)/unroot-tests-emulation: $(BUILD_DIR)/doctest/tests/doctest_main.o $(B
 .PHONY: e2e
 e2e: $(TARGET_BIN) $(UTIL_BIN)
 	@$(PYTEST) -q tests/e2e/test_capability_gates.py
-	@$(PYTEST) -q tests/e2e/test_native_enter.py tests/e2e/test_archive.py tests/e2e/test_single_pack.py tests/e2e/test_exclusions.py tests/e2e/test_oci_import.py tests/e2e/test_rich_idmap.py tests/e2e/test_rootfs_journey.py
+	@$(PYTEST) -q tests/e2e/test_native_enter.py tests/e2e/test_archive.py tests/e2e/test_single_pack.py tests/e2e/test_exclusions.py tests/e2e/test_oci_import.py tests/e2e/test_rich_idmap.py tests/e2e/test_rootfs_journey.py tests/e2e/test_device_archive.py tests/e2e/test_dev_sidecar.py
 
 .PHONY: e2e-cross
 e2e-cross: $(TARGET_BIN) $(UTIL_BIN)

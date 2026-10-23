@@ -99,6 +99,10 @@ libraries remain available, while relative archive traversal sees the logical
 IDs established by the namespace. The archive itself is passed as an inherited
 descriptor.
 
+For managed `/dev` preservation, the engine records the policy in rootfs metadata and supplies the helper with the relative device-tree path and a pinned sidecar descriptor (`--dev-path` and `--dev-fd`). During extraction, the helper copies that subtree's archive entries to an uncompressed PAX tar without creating filesystem objects. During packing it reads the saved entries back, validates that their paths remain within the selected subtree, and applies exclusion patterns. The engine publishes the completed sidecar only after extraction succeeds. A managed path without a sidecar descriptor means discard its contents; no managed path means preserve the existing on-disk tree. These are internal transport arguments, not additional user-facing pack options. Device handling adds no extra input-archive decompression pass.
+
+When converting cpio input to the `/dev` tar sidecar, the helper uses libarchive's hard-link references to retain pending headers until their file contents arrive. Some cpio formats store the contents on the last link, while tar needs a content-bearing file before its links. Empty groups are written at end of input. Only headers are buffered; file contents are streamed, without another input pass or temporary extracted files.
+
 ## Scope Discipline
 
 The helper is not a second application layer and must not become a general

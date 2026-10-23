@@ -62,6 +62,10 @@ void addReport(archiveinfo::ArchiveReport& target,
   target.regularBytes = sum(target.regularBytes, source.regularBytes);
   target.maxUid = std::max(target.maxUid, source.maxUid);
   target.maxGid = std::max(target.maxGid, source.maxGid);
+  target.outsideDev.maxUid = std::max(target.outsideDev.maxUid, source.outsideDev.maxUid);
+  target.outsideDev.maxGid = std::max(target.outsideDev.maxGid, source.outsideDev.maxGid);
+  target.outsideDev.posixAcl |= source.outsideDev.posixAcl;
+  target.outsideDev.xattr |= source.outsideDev.xattr;
   addFinding(target.unsafePaths, source.unsafePaths);
   addFinding(target.acls, source.acls);
   addFinding(target.xattrs, source.xattrs);
