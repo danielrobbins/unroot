@@ -1,3 +1,19 @@
+# Unroot 1.0.7
+
+**Archive Preservation and Reliability** -- October 23, 2026.
+
+Unroot 1.0.7 makes working with real-world root filesystems more dependable, from importing minimal container images to building packages under QEMU and packing the results for reuse. It also strengthens archive handling and separates the devices needed during an entered session from the contents of the original archive.
+
+- Entering a rootfs previously left regular-file device mountpoints behind, which could then be packed as though they were real devices. Unroot now provides a temporary `/dev` during entry. For newly unpacked tar and cpio archives, the original `/dev` subtree is saved separately and restored when packing, preserving its devices and metadata without requiring rootless device creation. `unpack --discard-dev` omits those contents instead; OCI imports already discard them. Existing roots retain their underlying `/dev` contents and are not automatically migrated. ([#42](https://github.com/danielrobbins/unroot/issues/42))
+- Some OCI images could not be imported because their layers included an ordinary root-directory entry. These entries are now accepted, with their ownership, permissions, timestamps, and supported extended metadata preserved. Minimal images without `/etc` also unpack successfully: optional default injections are skipped with a notice when their destination directory is absent. Explicit injection requests still require that directory to exist.
+- Foreign-architecture programs launched by Bash could fail when QEMU was given Bash's open script instead of the requested executable. Unroot now checks which file that descriptor refers to before using it. Native entry can also reuse a compatible host emulation handler when automatic lookup cannot find a separate QEMU binary.
+- Unreadable ownership metadata could make a managed root appear unmanaged. Unroot now reports the read failure and preserves the recorded ownership checks. Errors involving command execution, missing emulators, and injection destinations also explain more clearly what went wrong.
+- Archive inspection now rejects parent-directory traversal before extraction starts, and extraction independently protects Unroot's reserved metadata paths. Packing retains an open reference to each preserved injection original, preventing pathname changes from selecting a different file. Emulation wrappers are independent copies, so changing one inside a rootfs no longer changes the host executable's permissions or contents. Existing hard-linked wrappers are replaced on their next emulated entry.
+
+Validation included six complete FFS bootstraps: musl and glibc on x86-64, ARM64, and RISC-V, followed by packing, unpacking, and checking the resulting archives. Automated tests now distinguish missing host capabilities from failures in the operation being tested, so a broken import or archive round trip cannot be mistaken for an unsupported test environment.
+
+Thanks to tarilka0gg for the bug reports, fixes, and careful review that helped shape this release.
+
 # Unroot 1.0.6
 
 **Features and Bug Fixes** -- October 17, 2026.
