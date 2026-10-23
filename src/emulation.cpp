@@ -114,27 +114,32 @@ EmuPlan Manager::prepare() {
   if (!settings_.native && settings_.qemu.empty())
     source = util::findOnPath(emulator + "-static");
   if (!settings_.native && source.empty()) source = util::findOnPath(emulator);
+  std::string missingEmulator;
   if (source.empty() || !isStaticElf(source)) {
     std::string requested = settings_.qemu.empty()
                                 ? "'" + emulator + "-static' or '" + emulator + "'"
                                 : "'" + emulator + "'";
-    throw AppException(
-        util::make_error(util::LibErr::NotFound, 0,
-                         "static QEMU user emulator " + requested +
-                             (settings_.native
-                                  ? " was not found at a trusted root-controlled path"
-                                  : " was not found or is not statically linked")),
-        "enter");
+    missingEmulator = "static QEMU user emulator " + requested +
+                     (settings_.native
+                          ? " was not found at a trusted root-controlled path"
+                          : " was not found or is not statically linked");
+    // An existing fixed-interpreter handler retains its own emulator. Only
+    // automatic native selection may reuse it without finding a local binary.
+    if (!settings_.native || !settings_.qemu.empty())
+      throw AppException(
+          util::make_error(util::LibErr::NotFound, 0, missingEmulator), "enter");
   }
-  ElfInfo emulatorInfo = readElfInfoAtPath(source);
-  if (emulatorInfo.archName != settings_.hostArch) {
-    throw AppException(
-        util::make_error(util::LibErr::Invalid, 0,
-                         "QEMU emulator must be executable by host architecture '" +
-                             settings_.hostArch + "'"),
-        "enter");
+  if (!source.empty()) {
+    ElfInfo emulatorInfo = readElfInfoAtPath(source);
+    if (emulatorInfo.archName != settings_.hostArch) {
+      throw AppException(
+          util::make_error(util::LibErr::Invalid, 0,
+                           "QEMU emulator must be executable by host architecture '" +
+                               settings_.hostArch + "'"),
+          "enter");
+    }
+    compat::earlyCheck(source);
   }
-  compat::earlyCheck(source);
 
   auto [magic, mask] =
       readElfMagicAndMaskAtRoot(settings_.root, settings_.executable);
@@ -151,7 +156,9 @@ EmuPlan Manager::prepare() {
         "unroot-" + settings_.targetArch, source, magic, mask);
     if (!registration) {
       throw AppException(
-          util::make_error(util::LibErr::Io, 0, registration.error), "enter");
+          util::make_error(util::LibErr::Io, 0,
+                           (missingEmulator.empty() ? "" : missingEmulator + "; ") +
+                               registration.error), "enter");
     }
     util::hostLogStep("binfmt:host", true,
                       (registration.reused ? "reused " : "registered ") +

@@ -137,7 +137,7 @@ clean:
 	@echo "[clean] removing objects and dependency files" ; \
 	find $(SRC_DIR) -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true; \
 	find legacy -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true; \
-	rm -f *.o *.d legacy/*.o legacy/sds/*.o $(BIN_DIR)/unroot $(UTIL_BIN) $(BIN_DIR)/unroot-tests $(BIN_DIR)/unroot-legacy $(BIN_DIR)/unroot-d 2>/dev/null || true; \
+	rm -f *.o *.d legacy/*.o legacy/sds/*.o $(BIN_DIR)/unroot $(UTIL_BIN) $(BIN_DIR)/unroot-tests $(BIN_DIR)/unroot-tests-emulation $(BIN_DIR)/unroot-legacy $(BIN_DIR)/unroot-d 2>/dev/null || true; \
 	rm -rf $(BUILD_DIR)/unroot-util 2>/dev/null || true; \
 	rm -rf $(BUILD_DIR)/doctest 2>/dev/null || true; \
 	rm -f $(BUILD_DIR)/version.hpp $(LIBARCHIVE_PROBE_BIN) 2>/dev/null || true
@@ -654,9 +654,19 @@ $(BIN_DIR)/unroot-tests-doctest: $(DOCTEST_OBJECTS)
 	@echo "[doctest] built bin/unroot-tests-doctest (sources: $$(echo $(DOCTEST_TEST_SRCS) | wc -w))"
 
 .PHONY: test
-test: $(UTIL_BIN) doctest
+test: $(UTIL_BIN) doctest $(BIN_DIR)/unroot-tests-emulation
 	@echo "--- Running doctest suite ---"
 	@$(BIN_DIR)/unroot-tests-doctest
+	@echo "--- Running emulation manager tests ---"
+	@$(BIN_DIR)/unroot-tests-emulation
+
+$(BUILD_DIR)/doctest/src/emulation.o: $(VERSION_HDR)
+
+$(BIN_DIR)/unroot-tests-emulation: $(BUILD_DIR)/doctest/tests/doctest_main.o $(BUILD_DIR)/doctest/tests/emulation_manager.o $(BUILD_DIR)/doctest/src/emulation.o
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(DOCTEST_FLAGS) $^ -o $@ -pthread
+
+-include $(BUILD_DIR)/doctest/tests/emulation_manager.d $(BUILD_DIR)/doctest/src/emulation.d
 
 .PHONY: e2e
 e2e: $(TARGET_BIN) $(UTIL_BIN)
