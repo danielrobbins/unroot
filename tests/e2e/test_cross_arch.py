@@ -139,7 +139,7 @@ def test_foreign_shebang_preserves_interpreter_and_script_arguments(unroot, argu
     ]
 
 
-@pytest.mark.parametrize("last_open", [9, 31, 254])
+@pytest.mark.parametrize("last_open", [9, 31, 254, 255])
 @pytest.mark.parametrize("launcher", ["launcher", "probe"])
 def test_foreign_exec_closes_kernel_descriptor_not_callers_fds(
     unroot, tmp_path, require_capability, last_open, launcher,
