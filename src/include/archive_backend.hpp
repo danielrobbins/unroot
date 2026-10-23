@@ -25,7 +25,8 @@ class Backend {
   int extract(const std::filesystem::path& root,
               const util::IdMapPlan& idmap,
               const archiveio::Input& input, bool force,
-              const archiveio::DeviceTree& devices) const;
+              const archiveio::DeviceTree& devices,
+              const std::string& rootPrefix) const;
   int applyLayer(const std::filesystem::path& root,
                  const util::IdMapPlan& idmap,
                  const archiveio::Input& input, bool force) const;

@@ -35,7 +35,7 @@ struct NormalizedPath {
   bool unsafe = false;
 };
 
-NormalizedPath normalizePath(const char* raw, bool strict = false) {
+NormalizedPath normalizePath(const char* raw) {
   if (!raw) return {{}, {}, true};
   const std::string input(raw);
   NormalizedPath result;
@@ -48,7 +48,7 @@ NormalizedPath normalizePath(const char* raw, bool strict = false) {
         input.substr(begin, end == std::string::npos ? end : end - begin);
     if (!component.empty() && component != ".") {
       if (component == "..") {
-        if (strict) result.unsafe = true;
+        result.unsafe = true;
         if (components.empty())
           result.unsafe = true;
         else
@@ -101,7 +101,7 @@ void inspectType(struct archive_entry* entry, const std::string& path,
                  archiveinfo::ArchiveReport& report, bool ociLayer) {
   if (const char* target = archive_entry_hardlink(entry)) {
     addExample(report.hardLinks, path);
-    const auto normalized = normalizePath(target, ociLayer);
+    const auto normalized = normalizePath(target);
     if (normalized.unsafe)
       addExample(report.unsafePaths, path + " -> " + normalized.value);
     if (normalized.top == ".unroot") report.reservedMetadata = true;
@@ -179,7 +179,7 @@ ArchiveScanResult inspectArchive(int descriptor, int progressDescriptor,
   int status = ARCHIVE_OK;
   while ((status = archive_read_next_header(reader.get(), &entry)) ==
          ARCHIVE_OK) {
-    const auto path = normalizePath(archive_entry_pathname(entry), ociLayer);
+    const auto path = normalizePath(archive_entry_pathname(entry));
     ++report.members;
     if (path.unsafe) addExample(report.unsafePaths, path.value);
     if (path.top == ".unroot") report.reservedMetadata = true;
