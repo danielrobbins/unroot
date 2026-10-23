@@ -287,7 +287,7 @@ int ArchiveAction::perform(const UnpackConfig& config) {
     }
   } else {
     result = backend.extract(pinnedRoot, initialized.plan, input, config.force,
-                             devices);
+                             devices, config.rootPrefix);
   }
   if (preserveDev) {
     if (result == 0 && (::fsync(devArchive.get()) != 0 ||

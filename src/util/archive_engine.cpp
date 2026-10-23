@@ -207,23 +207,65 @@ bool writeSubstitution(
     message = "unable to allocate archive substitution reader";
     return false;
   }
-  archive_read_disk_set_symlink_physical(disk.get());
+  Rootfs root(".");
+  UniqueFd pinned = root.file(substitution.source, O_PATH);
+  struct stat original {};
+  if (!pinned || ::fstat(pinned.get(), &original) != 0 ||
+      (!S_ISREG(original.st_mode) && !S_ISLNK(original.st_mode))) {
+    message = "unable to pin preserved injection original: " + substitution.source;
+    return false;
+  }
+  UniqueFd parent;
+  std::string source;
+  if (S_ISREG(original.st_mode)) {
+    // Follow only our descriptor, never reopen the mutable backup pathname.
+    pinned = reopenArchiveDescriptor(pinned.get(), O_RDONLY, message);
+    if (!pinned) return false;
+    source = Rootfs::fdPath(pinned.get());
+    archive_read_disk_set_symlink_logical(disk.get());
+  } else {
+    const auto separator = substitution.source.rfind('/');
+    parent = root.directory(separator == std::string::npos
+                                ? "/" : substitution.source.substr(0, separator));
+    if (!parent) {
+      message = "unable to pin preserved symlink parent";
+      return false;
+    }
+    source = Rootfs::fdPath(parent.get()) + "/" +
+             substitution.source.substr(separator == std::string::npos ? 0 : separator + 1);
+    archive_read_disk_set_symlink_physical(disk.get());
+  }
   archive_read_disk_set_behavior(disk.get(), ARCHIVE_READDISK_RESTORE_ATIME);
-  if (archive_read_disk_open(disk.get(), substitution.source.c_str()) !=
-      ARCHIVE_OK) {
+  if (archive_read_disk_open(disk.get(), source.c_str()) != ARCHIVE_OK) {
     archiveFailure(disk.get(), message);
     return false;
   }
   const int status = archive_read_next_header2(disk.get(), entry.get());
-  if (!acceptWarning(disk.get(), status, force, message) ||
-      status == ARCHIVE_EOF ||
-      !writeEntry(disk.get(), writer, entry.get(), substitution.destination,
-                  links, progress, force, rootOnly, message)) {
+  if (!acceptWarning(disk.get(), status, force, message) || status == ARCHIVE_EOF) {
     if (status == ARCHIVE_EOF && message.empty())
       message = "archive substitution source is missing";
     archive_read_close(disk.get());
     return false;
   }
+  if (archive_entry_dev(entry.get()) != original.st_dev ||
+      archive_entry_ino64(entry.get()) != static_cast<la_int64_t>(original.st_ino) ||
+      archive_entry_filetype(entry.get()) != (original.st_mode & S_IFMT)) {
+    message = "preserved injection original changed while packing";
+    return false;
+  }
+  if (S_ISLNK(original.st_mode)) {
+    // Keep the original link text even if its directory entry is replaced.
+    std::vector<char> target(static_cast<size_t>(original.st_size) + 1);
+    const ssize_t size = ::readlinkat(pinned.get(), "", target.data(), target.size());
+    if (size < 0 || static_cast<size_t>(size) >= target.size()) {
+      message = "unable to read preserved symlink";
+      return false;
+    }
+    target[static_cast<size_t>(size)] = '\0';
+    archive_entry_set_symlink(entry.get(), target.data());
+  }
+  if (!writeEntry(disk.get(), writer, entry.get(), substitution.destination,
+                  links, progress, force, rootOnly, message)) return false;
   archive_read_close(disk.get());
   return true;
 }
@@ -258,18 +300,30 @@ bool safePath(const char* raw, std::vector<std::string>& components,
   return allowRoot || !components.empty();
 }
 
-bool reservedPath(const std::vector<std::string>& components) {
-  return !components.empty() && components.front() == ".unroot";
+bool reservedPath(const std::vector<std::string>& components,
+                  const std::vector<std::string>& rootPrefix = {}) {
+  return (!components.empty() && components.front() == ".unroot") ||
+         (!rootPrefix.empty() && components.size() > rootPrefix.size() &&
+          std::equal(rootPrefix.begin(), rootPrefix.end(), components.begin()) &&
+          components[rootPrefix.size()] == ".unroot");
 }
 
-bool layerPath(struct archive_entry* entry, std::vector<std::string>& path,
-               std::string& message) {
+bool archivePath(struct archive_entry* entry, std::vector<std::string>& path,
+                 std::string& message,
+                 const std::vector<std::string>& rootPrefix = {}) {
   if (!safePath(archive_entry_pathname(entry), path, true) ||
-      reservedPath(path) ||
+      reservedPath(path, rootPrefix) ||
       (path.empty() && (archive_entry_filetype(entry) != AE_IFDIR ||
                         archive_entry_hardlink(entry)))) {
-    message = "OCI layer contains an unsafe or reserved path";
+    message = "archive contains an unsafe or reserved path";
     return false;
+  }
+  if (const char* target = archive_entry_hardlink(entry)) {
+    std::vector<std::string> link;
+    if (!safePath(target, link) || reservedPath(link, rootPrefix)) {
+      message = "archive contains an unsafe or reserved hard-link target";
+      return false;
+    }
   }
   return true;
 }
@@ -579,14 +633,7 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
       return false;
     }
     std::vector<std::string> path;
-    if (!layerPath(entry, path, message)) return false;
-    if (const char* target = archive_entry_hardlink(entry)) {
-      std::vector<std::string> link;
-      if (!safePath(target, link) || reservedPath(link)) {
-        message = "OCI layer contains an unsafe hard-link target";
-        return false;
-      }
-    }
+    if (!archivePath(entry, path, message)) return false;
     Whiteout whiteout;
     bool marker = false;
     if (!path.empty() &&
@@ -625,10 +672,10 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
   return true;
 }
 
-bool prepareLayerPath(struct archive_entry* entry, bool& marker, bool& rootDirectory,
+bool prepareLayerPath(struct archive_entry* entry,
+                      const std::vector<std::string>& path,
+                      bool& marker, bool& rootDirectory,
                       std::string& message) {
-  std::vector<std::string> path;
-  if (!layerPath(entry, path, message)) return false;
   rootDirectory = path.empty();
   if (rootDirectory) return true;
   Whiteout whiteout;
@@ -656,7 +703,13 @@ bool prepareLayerPath(struct archive_entry* entry, bool& marker, bool& rootDirec
 int extractArchive(int descriptor, bool force, bool layer,
                    std::string& message, int progressDescriptor,
                    ProgressStyle progressStyle,
-                   const archiveio::DeviceTree& devices) {
+                   const archiveio::DeviceTree& devices,
+                   const std::string& rootPrefix = {}) {
+  std::vector<std::string> prefix;
+  if (!rootPrefix.empty() && !safePath(rootPrefix.c_str(), prefix)) {
+    message = "invalid archive root prefix";
+    return 1;
+  }
   DeviceArchive dev(devices);
   if (!dev.begin(message)) return 1;
   if (layer && !scanAndApplyWhiteouts(descriptor, message)) return 1;
@@ -692,7 +745,9 @@ int extractArchive(int descriptor, bool force, bool layer,
   while ((status = archive_read_next_header(reader.get(), &entry)) !=
          ARCHIVE_EOF) {
     if (status == ARCHIVE_RETRY) continue;
+    std::vector<std::string> path;
     if (!acceptWarning(reader.get(), status, force, message) ||
+        !archivePath(entry, path, message, prefix) ||
         !dev.checkLink(entry, message)) return 1;
     if (dev.contains(canonicalPath(archive_entry_pathname(entry)))) {
       if (!dev.save(reader.get(), entry, progress, message)) return 1;
@@ -701,7 +756,7 @@ int extractArchive(int descriptor, bool force, bool layer,
     }
     bool marker = false;
     bool rootDirectory = false;
-    if (layer && !prepareLayerPath(entry, marker, rootDirectory, message)) {
+    if (layer && !prepareLayerPath(entry, path, marker, rootDirectory, message)) {
       archive_read_close(reader.get());
       return 1;
     }
@@ -746,9 +801,10 @@ int extractArchive(int descriptor, bool force, bool layer,
 
 int unpackArchive(int descriptor, bool force, std::string& message,
                    int progressDescriptor, ProgressStyle progressStyle,
-                   const archiveio::DeviceTree& devices) {
+                   const archiveio::DeviceTree& devices,
+                   const std::string& rootPrefix) {
   return extractArchive(descriptor, force, false, message,
-                        progressDescriptor, progressStyle, devices);
+                        progressDescriptor, progressStyle, devices, rootPrefix);
 }
 
 int applyOciLayer(int descriptor, bool force, std::string& message,

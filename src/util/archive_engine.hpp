@@ -12,7 +12,8 @@ namespace util {
 int unpackArchive(int descriptor, bool force, std::string& message,
                   int progressDescriptor = -1,
                   ProgressStyle progressStyle = ProgressStyle::Ascii,
-                  const archiveio::DeviceTree& devices = {});
+                  const archiveio::DeviceTree& devices = {},
+                  const std::string& rootPrefix = {});
 int applyOciLayer(int descriptor, bool force, std::string& message,
                   int progressDescriptor = -1,
                   ProgressStyle progressStyle = ProgressStyle::Ascii,

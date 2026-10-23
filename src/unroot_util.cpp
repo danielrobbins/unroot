@@ -162,7 +162,8 @@ int archiveCommand(int argc, char** argv) {
                 force = true;
                 continue;
             }
-            if (operation == "inspect" && option == "--root-prefix" &&
+            if ((operation == "inspect" || operation == "unpack") &&
+                option == "--root-prefix" &&
                 rootPrefix.empty() && index < argc) {
                 rootPrefix = argv[index++];
                 continue;
@@ -205,7 +206,7 @@ int archiveCommand(int argc, char** argv) {
                                   progress.selectedStyle(), devices)
             : util::unpackArchive(static_cast<int>(descriptor), force, error,
                                   progress.descriptor,
-                                  progress.selectedStyle(), devices);
+                                  progress.selectedStyle(), devices, rootPrefix);
         if (!error.empty())
             std::cerr << (result == 0 ? "Warning: " : "") << error << '\n';
         return result;

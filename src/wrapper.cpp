@@ -91,20 +91,8 @@ bool installSelfAsWrapper(const std::string& rootPath) {
     return false;
   }
   char selfPath[PATH_MAX]; ssize_t n = ::readlink("/proc/self/exe", selfPath, sizeof(selfPath)-1); if (n <= 0) return false; selfPath[n]='\0';
-  struct stat selfSt{}; if (::stat(selfPath, &selfSt) != 0) return false;
-  // Fast path: if existing wrapper hard-linked to self (same dev+ino) skip
-  struct stat dstSt{}; if (root.stat(destination, dstSt)) {
-    if (dstSt.st_dev == selfSt.st_dev && dstSt.st_ino == selfSt.st_ino) {
-      hostLogStep("wrapper:install", true, "hardlink-skip " + rootPath + destination);
-      return true;
-    }
-  }
-  // Attempt hard link first (same filesystem)
-  if (root.linkHostFile(selfPath, destination)) {
-    hostLogStep("wrapper:install", true, "hardlink " + rootPath + destination);
-    return true;
-  }
-  // Fallback to copy
+  // Keep rootfs changes separate from the host executable. Atomic replacement
+  // also detaches wrappers hard-linked by earlier Unroot versions.
   bool ok = root.copyHostFileAtomic(selfPath, destination);
   hostLogStep("wrapper:install", ok,
               (ok ? "copy " : "copy failed ") + rootPath + destination);

@@ -123,7 +123,8 @@ int Backend::create(const fs::path& root, const util::IdMapPlan& idmap,
 
 int Backend::extract(const fs::path& root, const util::IdMapPlan& idmap,
                      const archiveio::Input& input, bool force,
-                     const archiveio::DeviceTree& devices) const {
+                     const archiveio::DeviceTree& devices,
+                     const std::string& rootPrefix) const {
   UniqueFd archive = input.duplicateForChild();
   if (!archive) return -1;
   UniqueFd dev(devices.descriptor >= 0 ? childDescriptor(devices.descriptor)
@@ -131,6 +132,8 @@ int Backend::extract(const fs::path& root, const util::IdMapPlan& idmap,
   if (devices.descriptor >= 0 && !dev) return -1;
   std::vector<std::string> arguments{
       helper_, "archive", "unpack", "--fd", std::to_string(archive.get())};
+  if (!rootPrefix.empty())
+    arguments.insert(arguments.end(), {"--root-prefix", rootPrefix});
   deviceArguments(arguments, devices, dev.get());
   if (force) arguments.push_back("--force");
   util::ProgressOutput progress;
