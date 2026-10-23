@@ -236,7 +236,8 @@ void extractionProgress(void* data) {
   progress->output.update(progress->reader);
 }
 
-bool safePath(const char* raw, std::vector<std::string>& components) {
+bool safePath(const char* raw, std::vector<std::string>& components,
+              bool allowRoot = false) {
   if (!raw || !*raw || *raw == '/') return false;
   components.clear();
   const std::string path(raw);
@@ -252,11 +253,23 @@ bool safePath(const char* raw, std::vector<std::string>& components) {
     if (end == std::string::npos) break;
     start = end + 1;
   }
-  return !components.empty();
+  return allowRoot || !components.empty();
 }
 
 bool reservedPath(const std::vector<std::string>& components) {
   return !components.empty() && components.front() == ".unroot";
+}
+
+bool layerPath(struct archive_entry* entry, std::vector<std::string>& path,
+               std::string& message) {
+  if (!safePath(archive_entry_pathname(entry), path, true) ||
+      reservedPath(path) ||
+      (path.empty() && (archive_entry_filetype(entry) != AE_IFDIR ||
+                        archive_entry_hardlink(entry)))) {
+    message = "OCI layer contains an unsafe or reserved path";
+    return false;
+  }
+  return true;
 }
 
 UniqueFd openDirectory(int parent, const std::string& name) {
@@ -390,10 +403,7 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
       return false;
     }
     std::vector<std::string> path;
-    if (!safePath(archive_entry_pathname(entry), path) || reservedPath(path)) {
-      message = "OCI layer contains an unsafe or reserved path";
-      return false;
-    }
+    if (!layerPath(entry, path, message)) return false;
     if (const char* target = archive_entry_hardlink(entry)) {
       std::vector<std::string> link;
       if (!safePath(target, link) || reservedPath(link)) {
@@ -403,7 +413,8 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
     }
     Whiteout whiteout;
     bool marker = false;
-    if (!whiteoutEntry(entry, path, whiteout, marker, message)) return false;
+    if (!path.empty() &&
+        !whiteoutEntry(entry, path, whiteout, marker, message)) return false;
     if (marker) whiteouts.push_back(std::move(whiteout));
     if (archive_read_data_skip(reader.get()) < ARCHIVE_WARN) {
       archiveFailure(reader.get(), message);
@@ -438,13 +449,12 @@ bool scanAndApplyWhiteouts(int descriptor, std::string& message) {
   return true;
 }
 
-bool prepareLayerPath(struct archive_entry* entry, bool& marker,
+bool prepareLayerPath(struct archive_entry* entry, bool& marker, bool& rootDirectory,
                       std::string& message) {
   std::vector<std::string> path;
-  if (!safePath(archive_entry_pathname(entry), path) || reservedPath(path)) {
-    message = "OCI layer contains an unsafe or reserved path";
-    return false;
-  }
+  if (!layerPath(entry, path, message)) return false;
+  rootDirectory = path.empty();
+  if (rootDirectory) return true;
   Whiteout whiteout;
   if (!whiteoutEntry(entry, path, whiteout, marker, message)) return false;
   if (marker) return true;
@@ -497,16 +507,29 @@ int extractArchive(int descriptor, bool force, bool layer,
       ARCHIVE_EXTRACT_SECURE_NODOTDOT |
       ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
   if (!layer) options |= ARCHIVE_EXTRACT_NO_OVERWRITE;
+  ArchiveEntry rootEntry(nullptr, archive_entry_free);
   struct archive_entry* entry = nullptr;
   int status;
   while ((status = archive_read_next_header(reader.get(), &entry)) !=
          ARCHIVE_EOF) {
     if (status == ARCHIVE_RETRY) continue;
     bool marker = false;
+    bool rootDirectory = false;
     if (!acceptWarning(reader.get(), status, force, message) ||
-        (layer && !prepareLayerPath(entry, marker, message))) {
+        (layer && !prepareLayerPath(entry, marker, rootDirectory, message))) {
       archive_read_close(reader.get());
       return 1;
+    }
+    if (rootDirectory) {
+      // libarchive restores existing-directory timestamps immediately. Save the
+      // root attributes until its children are written, including restrictive modes.
+      rootEntry.reset(archive_entry_clone(entry));
+      if (!rootEntry) {
+        message = "unable to preserve OCI root directory metadata";
+        return 1;
+      }
+      archive_entry_set_pathname(rootEntry.get(), ".");
+      marker = true;
     }
     if (marker) {
       if (archive_read_data_skip(reader.get()) < ARCHIVE_WARN) {
@@ -524,6 +547,9 @@ int extractArchive(int descriptor, bool force, bool layer,
     }
     progress.update(reader.get());
   }
+  if (rootEntry && !acceptWarning(
+          reader.get(), archive_read_extract(reader.get(), rootEntry.get(), options),
+          force, message)) return 1;
   progress.update(reader.get());
   progress.complete();
   archive_read_close(reader.get());
