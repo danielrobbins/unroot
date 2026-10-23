@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional, Set
 
@@ -14,6 +15,8 @@ from .support import (
     create_rootfs,
     find_static_busybox,
     run_command,
+    rich_idmap_allocation,
+    rich_namespace_unavailable,
     snapshot_host,
 )
 
@@ -123,6 +126,24 @@ def require_capability(
 
 
 @pytest.fixture(scope="session")
+def require_rich_idmap(unroot_binary: Path, require_capability):
+    @lru_cache(maxsize=None)
+    def qualify(count):
+        allocation, reason = rich_idmap_allocation(
+            unroot_binary.with_name("unroot-util"), count
+        )
+        return allocation, reason or rich_namespace_unavailable()
+
+    def require(count=65535, capability="rich_idmap"):
+        allocation, reason = qualify(count)
+        require_capability(not reason, reason, capability)
+        assert allocation is not None
+        return allocation
+
+    return require
+
+
+@pytest.fixture(scope="session")
 def privileged_prefix(
     require_capability: Callable[[bool, str, Optional[str]], None],
 ) -> tuple[str, ...]:
@@ -180,30 +201,32 @@ def managed_rootfs(
     tmp_path: Path,
     unroot: UnrootRunner,
     require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> Path:
     busybox = find_static_busybox()
     require_capability(
         busybox is not None,
         "a static BusyBox is required; install busybox-static or set BUSYBOX",
     )
-    return _managed_rootfs(tmp_path, unroot, require_capability, busybox)
+    return _managed_rootfs(tmp_path, unroot, require_rich_idmap, busybox)
 
 
 @pytest.fixture
 def empty_rootfs(
     tmp_path: Path,
     unroot: UnrootRunner,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> Path:
-    return _managed_rootfs(tmp_path, unroot, require_capability)
+    return _managed_rootfs(tmp_path, unroot, require_rich_idmap)
 
 
 def _managed_rootfs(
     tmp_path: Path,
     unroot: UnrootRunner,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
     busybox: Optional[Path] = None,
 ) -> Path:
+    require_rich_idmap()
     source = create_rootfs(tmp_path / "source", busybox)
     archive = tmp_path / "rootfs.tar"
     subprocess.run(
@@ -215,10 +238,5 @@ def _managed_rootfs(
         check=True,
     )
     root = tmp_path / "root"
-    result = unroot.run("unpack", str(archive), str(root))
-    require_capability(
-        result.returncode == 0,
-        "managed rootfs setup requires rich ID mapping:\n" + result.diagnostic(),
-        "rich_idmap",
-    )
+    unroot.run("unpack", str(archive), str(root)).assert_ok()
     return root

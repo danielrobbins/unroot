@@ -7,11 +7,11 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 import pytest
 
-from .support import CommandResult, UnrootRunner, run_command
+from .support import UnrootRunner, run_command
 
 
 pytestmark = [
@@ -22,66 +22,6 @@ pytestmark = [
         reason="Unroot E2E requires Linux",
     ),
 ]
-
-
-def _helper_allocation(
-    helper: Path, count: int
-) -> Tuple[Optional[Tuple[int, int]], str]:
-    if not helper.is_file() or not os.access(helper, os.X_OK):
-        return None, f"unroot-util not found or not executable: {helper}"
-    result = subprocess.run(
-        [str(helper), "idmap", "--count", str(count)],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    if result.returncode != 0:
-        return None, (result.stderr or result.stdout).strip()
-    fields = result.stdout.split()
-    if len(fields) != 5 or fields[0] != "unroot-idmap-v1":
-        return None, f"invalid unroot-util response: {result.stdout!r}"
-    try:
-        uid_start, gid_start, returned = map(int, fields[1:4])
-    except ValueError:
-        return None, f"invalid unroot-util response: {result.stdout!r}"
-    if returned != count:
-        return None, f"unroot-util returned {returned} IDs, expected {count}"
-    return (uid_start, gid_start), ""
-
-
-def _require_allocation(
-    unroot: UnrootRunner,
-    count: int,
-    require_capability: Callable[[bool, str, Optional[str]], None],
-) -> Tuple[int, int]:
-    allocation, detail = _helper_allocation(
-        unroot.binary.with_name("unroot-util"), count
-    )
-    helpers = (
-        shutil.which("newuidmap") is not None
-        and shutil.which("newgidmap") is not None
-    )
-    require_capability(
-        helpers and allocation is not None,
-        "rich ID mapping requires unroot-util, newuidmap, newgidmap, and a "
-        f"subordinate-ID allocation ({detail or 'mapping helpers unavailable'})",
-        "rich_idmap",
-    )
-    assert allocation is not None
-    return allocation
-
-
-def _require_mapping(
-    result: CommandResult,
-    require_capability: Callable[[bool, str, Optional[str]], None],
-) -> CommandResult:
-    require_capability(
-        result.returncode == 0,
-        "rich ID mapping is blocked by the host policy:\n" + result.diagnostic(),
-        "rich_idmap",
-    )
-    return result.assert_ok()
 
 
 def _compile_setgroups_probe(
@@ -128,17 +68,10 @@ def test_rich_mapping_allows_supplementary_group_changes(
     probe = _compile_setgroups_probe(tmp_path, require_capability)
     shutil.copy2(probe, managed_rootfs / "bin" / probe.name)
 
-    setting = _require_mapping(
-        unroot.run(
-            "enter",
-            str(managed_rootfs),
-            "--",
-            "/bin/busybox",
-            "cat",
-            "/proc/self/setgroups",
-        ),
-        require_capability,
-    )
+    setting = unroot.run(
+        "enter", str(managed_rootfs), "--", "/bin/busybox", "cat",
+        "/proc/self/setgroups",
+    ).assert_ok()
     assert setting.stdout.strip() == "allow"
 
     changed = unroot.run(
@@ -150,28 +83,18 @@ def test_rich_mapping_allows_supplementary_group_changes(
 def test_rich_mapping_translates_namespace_ownership(
     unroot: UnrootRunner,
     managed_rootfs: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
     count = 65535
-    uid_start, gid_start = _require_allocation(
-        unroot, count, require_capability
-    )
+    uid_start, gid_start = require_rich_idmap(count)
 
     owned = managed_rootfs / "tmp" / "rich-owned"
-    result = _require_mapping(
-        unroot.run(
-            "enter",
-            str(managed_rootfs),
-            "--",
-            "/bin/busybox",
-            "sh",
-            "-c",
-            "/bin/busybox touch /tmp/rich-owned && "
-            "/bin/busybox chown 1:1 /tmp/rich-owned && "
-            "/bin/busybox stat -c %u:%g /tmp/rich-owned",
-        ),
-        require_capability,
-    )
+    result = unroot.run(
+        "enter", str(managed_rootfs), "--", "/bin/busybox", "sh", "-c",
+        "/bin/busybox touch /tmp/rich-owned && "
+        "/bin/busybox chown 1:1 /tmp/rich-owned && "
+        "/bin/busybox stat -c %u:%g /tmp/rich-owned",
+    ).assert_ok()
 
     assert result.stdout.strip() == "1:1"
     status = owned.stat()
@@ -200,10 +123,10 @@ def test_rich_mapping_translates_namespace_ownership(
 def test_rich_mapping_refuses_stale_recorded_allocation(
     unroot: UnrootRunner,
     managed_rootfs: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
     count = 65535
-    _, gid_start = _require_allocation(unroot, count, require_capability)
+    _, gid_start = require_rich_idmap(count)
 
     metadata_path = managed_rootfs / ".unroot" / "meta.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -248,12 +171,10 @@ def test_rich_mapping_refuses_stale_recorded_allocation(
 def test_rich_archive_round_trip_preserves_logical_ownership(
     unroot: UnrootRunner,
     tmp_path: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
     count = 65535
-    uid_start, gid_start = _require_allocation(
-        unroot, count, require_capability
-    )
+    uid_start, gid_start = require_rich_idmap(count)
     source = tmp_path / "source"
     source.mkdir()
     (source / "owned").write_text("mapped\n", encoding="utf-8")
@@ -268,12 +189,7 @@ def test_rich_archive_round_trip_preserves_logical_ownership(
     )
 
     root = tmp_path / "root"
-    _require_mapping(
-        unroot.run(
-            "unpack", "--inject=-*", str(archive), str(root)
-        ),
-        require_capability,
-    )
+    unroot.run("unpack", "--inject=-*", str(archive), str(root)).assert_ok()
     status = (root / "owned").stat()
     assert status.st_uid == uid_start
     assert status.st_gid == gid_start + 1
@@ -297,12 +213,10 @@ def test_custom_rich_mapping_preserves_large_logical_ids(
     unroot: UnrootRunner,
     managed_rootfs: Path,
     tmp_path: Path,
-    require_capability: Callable[[bool, str, Optional[str]], None],
+    require_rich_idmap,
 ) -> None:
     count = 100000
-    uid_start, gid_start = _require_allocation(
-        unroot, count, require_capability
-    )
+    uid_start, gid_start = require_rich_idmap(count)
     high_id = tmp_path / "high-id"
     high_id.write_text("mapped\n", encoding="utf-8")
     source_archive = tmp_path / "source.tar"
@@ -317,25 +231,13 @@ def test_custom_rich_mapping_preserves_large_logical_ids(
     )
 
     root = tmp_path / "custom-root"
-    _require_mapping(
-        unroot.run(
-            "unpack", "--id-count", str(count), str(source_archive), str(root)
-        ),
-        require_capability,
-    )
-    visible = _require_mapping(
-        unroot.run(
-            "enter",
-            str(root),
-            "--",
-            "/bin/busybox",
-            "stat",
-            "-c",
-            "%u:%g",
-            "/high-id",
-        ),
-        require_capability,
-    )
+    unroot.run(
+        "unpack", "--id-count", str(count), str(source_archive), str(root)
+    ).assert_ok()
+    visible = unroot.run(
+        "enter", str(root), "--", "/bin/busybox", "stat", "-c", "%u:%g",
+        "/high-id",
+    ).assert_ok()
     assert visible.stdout.strip() == "100000:100000"
 
     status = (root / "high-id").stat()

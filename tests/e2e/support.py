@@ -242,16 +242,47 @@ def run_command(command: Sequence[str], *, timeout: int = 30) -> CommandResult:
     )
 
 
-def rich_idmap_available(unroot: UnrootRunner, count: int = 65535) -> bool:
-    helper = unroot.binary.with_name("unroot-util")
-    return (
-        shutil.which("newuidmap") is not None
-        and shutil.which("newgidmap") is not None
-        and helper.is_file()
-        and os.access(helper, os.X_OK)
-        and run_command([str(helper), "idmap", "--count", str(count)]).returncode
-        == 0
+def rich_idmap_allocation(
+    helper: Path, count: int,
+) -> Tuple[Optional[Tuple[int, int]], str]:
+    assert helper.is_file() and os.access(helper, os.X_OK), (
+        f"unroot-util not found or not executable: {helper}"
     )
+    result = run_command([str(helper), "idmap", "--count", str(count)])
+    missing = (
+        "error: no subordinate UID ranges available for ",
+        "error: no subordinate GID ranges available for ",
+        "error: no subordinate UID range can map ",
+        "error: no subordinate GID range can map ",
+    )
+    if result.returncode == 1 and result.stderr.startswith(missing):
+        return None, result.stderr.strip()
+    result.assert_ok()
+    fields = result.stdout.split()
+    assert len(fields) == 5 and fields[0] == "unroot-idmap-v1", result.diagnostic()
+    uid, gid, returned = map(int, fields[1:4])
+    assert returned == count and uid >= 0 and gid >= 0, result.diagnostic()
+    return (uid, gid), ""
+
+
+def rich_namespace_unavailable() -> str:
+    for command in ("newuidmap", "newgidmap", "unshare"):
+        if shutil.which(command) is None:
+            return f"rich-ID test qualification requires {command}"
+    # Probe kernel policy independently of Unroot's extraction and entry code.
+    result = run_command([
+        "env", "LC_ALL=C", "unshare", "--user", "--map-root-user",
+        "--mount", "--pid", "--fork", "/bin/true",
+    ])
+    restricted = {
+        "unshare: unshare failed: Operation not permitted",
+        "unshare: unshare failed: Permission denied",
+        "unshare: unshare failed: No space left on device",
+    }
+    if result.returncode == 1 and result.stderr.strip() in restricted:
+        return "host namespace policy prevents the test: " + result.stderr.strip()
+    result.assert_ok()
+    return ""
 
 
 def probe_private_binfmt(target: Path, entry: str) -> CommandResult:
