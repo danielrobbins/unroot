@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import struct
 import sys
 from pathlib import Path
 from typing import Callable, Optional
@@ -672,6 +673,25 @@ def test_custom_injection_requires_existing_destination_directory(
 
     assert result.returncode != 0, result.diagnostic()
     assert "injection destination directory does not exist" in result.stderr
+    assert "create the parent directory" in result.stderr
+    assert "--inject='-*'" in result.stderr
+
+
+def test_injection_helper_explains_missing_parent(
+    unroot: UnrootRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper = unroot.binary.with_name("unroot-util")
+    monkeypatch.chdir(tmp_path)
+    result = run_command([
+        str(helper), "injection", "install", "--target", "/proc/mounts",
+        "--destination", "/missing/mtab", "--backup", "/.unroot/backup",
+        "--absent", "/.unroot/absent", "--original", "capture",
+        "--uid", str(os.getuid()), "--gid", str(os.getgid()), "--mode", "420",
+    ])
+    assert result.returncode == 1, result.diagnostic()
+    assert "create the parent directory" in result.stderr
+    assert "--inject='-*'" in result.stderr
+    assert not list(tmp_path.iterdir())
 
 
 def test_custom_injection_restores_an_absent_destination(
@@ -961,6 +981,72 @@ def test_missing_command_in_explicit_path(
 
     assert result.returncode == 12, result.diagnostic()
     assert "enter failed: exec failed" in result.stderr, result.diagnostic()
+    assert "No such file or directory" in result.stderr, result.diagnostic()
+
+
+@pytest.mark.parametrize("failure,reason", [
+    ("missing", "No such file or directory"),
+    ("permissions", "Permission denied"),
+    ("interpreter", "No such file or directory"),
+])
+def test_exec_failure_reports_operating_system_reason(
+    unroot: UnrootRunner, tmp_path: Path, failure: str, reason: str
+) -> None:
+    root = create_rootfs(tmp_path / "root")
+    command = root / "bin" / "broken-script"
+    if failure != "missing":
+        command.write_text("#!/missing-interpreter\n", encoding="utf-8")
+        command.chmod(0o644 if failure == "permissions" else 0o755)
+    result = unroot.run("enter", "--single", str(root), "--", "/bin/broken-script")
+    assert result.returncode == 12, result.diagnostic()
+    assert f"exec failed: {reason}" in result.stderr, result.diagnostic()
+
+
+def test_qemu_options_explain_an_unrecognized_command(
+    unroot: UnrootRunner, tmp_path: Path
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    result = unroot.run("enter", "--single", str(root), "--qemu-cpu", "max",
+                        "--", "/missing-command")
+    assert result.returncode != 0
+    assert "cannot apply QEMU options" in result.stderr
+    assert "check the command and its interpreter" in result.stderr
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_missing_emulator_names_match_the_lookup(
+    unroot: UnrootRunner, tmp_path: Path, explicit: bool
+) -> None:
+    root = create_rootfs(tmp_path / "root")
+    header = bytearray(unroot.binary.read_bytes()[:64])
+    order = "<" if header[5] == 1 else ">"
+    host = struct.unpack_from(order + "H", header, 18)[0]
+    target, qemu = (62, "qemu-x86_64") if host == 183 else (183, "qemu-aarch64")
+    struct.pack_into(order + "H", header, 18, target)
+    (root / "bin" / "foreign").write_bytes(header)
+    (root / "bin" / "foreign").chmod(0o755)
+    missing = str(tmp_path / "missing-qemu")
+    options = ["--qemu", missing] if explicit else []
+    result = unroot.run("enter", "--single", str(root), *options,
+                        "--", "/bin/foreign", env={"PATH": str(tmp_path / "empty")})
+    assert result.returncode != 0, result.diagnostic()
+    expected = f"'{missing}'" if explicit else f"'{qemu}-static' or '{qemu}'"
+    assert expected in result.stderr, result.diagnostic()
+
+
+@pytest.mark.parametrize("status", [0, 37, 106])
+def test_single_target_exit_is_not_an_exec_failure(
+    unroot: UnrootRunner, tmp_path: Path, status: int
+) -> None:
+    busybox = find_static_busybox()
+    if busybox is None:
+        pytest.skip("a static BusyBox is required")
+    root = create_rootfs(tmp_path / "root", busybox)
+    result = unroot.run("enter", "--single", str(root), "--",
+                        "/bin/busybox", "sh", "-c", f"exit {status}")
+    assert result.returncode == status, result.diagnostic()
+    assert "exec failed" not in result.stderr
 
 
 def test_rooted_shebang_script(unroot: UnrootRunner, managed_rootfs: Path) -> None:

@@ -567,27 +567,30 @@ SetupResult setupNamespaceEnvironment(const std::string& rootfs, const EmuPlan* 
         cargv.push_back(nullptr);
         ::execvp(cargv[0], cargv.data());
         // On failure capture errno and emit a step before exiting with legacy code 106 (mapped to exec_failed)
-        int e = errno; (void)e; // errno captured for recordStep
+        int e = errno;
         {
           // Include errno string in note for clarity
           char note[128]; std::snprintf(note, sizeof(note), "%s errno=%d", cargv[0], e);
           recordStep("exec:fail", false, true, note);
         }
-        const char failed = 'E';
-        (void)util::write_all(execWrite.get(), &failed, 1);
+        (void)util::write_all(execWrite.get(), &e, sizeof(e));
         _exit(106);
     }
 
     execWrite.reset();
-    char execFailure = 0;
+    int execFailure = 0;
     ssize_t execResult;
     do {
-      execResult = ::read(execRead.get(), &execFailure, 1);
+      execResult = ::read(execRead.get(), &execFailure, sizeof(execFailure));
     } while (execResult < 0 && errno == EINTR);
     execRead.reset();
     if (execResult == 0) {
       const char complete = 'S';
       if (!util::write_all(setup.get(), &complete, 1)) _exit(101);
+    } else if (execResult == sizeof(execFailure)) {
+      const char failed = 'E';
+      (void)util::write_all(setup.get(), &failed, 1);
+      (void)util::write_all(setup.get(), &execFailure, sizeof(execFailure));
     }
     setup.reset();
 
@@ -732,7 +735,9 @@ static NsResult decodeChildStatus(int status, int setupErrno = 0) {
     case 104: return {4, namespacePolicyDiagnostic(
         "failed to set MS_PRIVATE", setupErrno)};
     case 105: return {11, "chroot/chdir failed"};
-    case 106: return {12, "exec failed"};
+    case 106: return {12, setupErrno
+                             ? "exec failed: " + std::string(std::strerror(setupErrno))
+                             : "exec failed"};
     case 107: return {13, "user bind map failed"};
     case 108: return {26, "pidns fork failed"};
     case 109: return {27, "target fork failed"};

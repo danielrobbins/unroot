@@ -365,7 +365,10 @@ int injectionCommand(int argc, char** argv) {
         original != "symlink" && original != "absent") return 2;
     if (!root.parentDirectoryExists(destination)) {
         std::cerr << "injection destination directory does not exist: "
-                  << destination << '\n';
+                  << destination
+                  << "; create the parent directory before adding this injection. "
+                     "For a new unpack, --inject='-NAME' disables a default "
+                     "injection and --inject='-*' disables all defaults.\n";
         return 1;
     }
 
