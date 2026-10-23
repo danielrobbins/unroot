@@ -187,6 +187,7 @@ def _oci_archive(
 def _working_layers() -> list[tuple[bytes, str]]:
     base = _layer(
         [
+            ("./", None, "dir"),
             ("etc", None, "dir"),
             ("etc/lower-only", b"remove me\n", "file"),
             ("etc/replaced", b"old\n", "file"),
@@ -197,6 +198,7 @@ def _working_layers() -> list[tuple[bytes, str]]:
     )
     update = _layer(
         [
+            (".", None, "dir"),
             ("etc/replaced", b"new\n", "file"),
             ("var/cache/current", b"preserve current layer\n", "file"),
             ("var/cache/.wh..wh..opq", b"", "file"),

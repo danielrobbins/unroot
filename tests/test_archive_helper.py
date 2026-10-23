@@ -1,6 +1,8 @@
+import io
 import json
 import os
 import select
+import struct
 import subprocess
 import tarfile
 from pathlib import Path
@@ -12,6 +14,98 @@ import pytest
 pytestmark = pytest.mark.skipif(
     os.name != "posix", reason="unroot-util descriptor tests require POSIX"
 )
+
+
+@pytest.mark.parametrize("root_name", [".", "./", "././", "././/"])
+def test_oci_layer_preserves_root_directory_metadata(tmp_path: Path, root_name: str) -> None:
+    helper = Path(__file__).parents[1] / "bin" / "unroot-util"
+    root = tmp_path / "root"
+    root.mkdir(mode=0o755)
+    (root / ".unroot").mkdir()
+    (root / ".unroot" / "keep").write_text("metadata", encoding="utf-8")
+    for index, mode in enumerate((0o750, 0o700)):
+        archive_path = tmp_path / f"layer-{index}.tar"
+        timestamp = 1234567890 + index
+        with tarfile.open(archive_path, "w", format=tarfile.PAX_FORMAT) as archive:
+            entry = tarfile.TarInfo(root_name)
+            entry.type = tarfile.DIRTYPE
+            entry.mode = mode
+            entry.uid, entry.gid = os.getuid(), os.getgid()
+            entry.mtime = timestamp
+            entry.pax_headers = {"SCHILY.xattr.user.layer": str(index)}
+            mask = "r-x" if index == 0 else "---"
+            entry.pax_headers["SCHILY.acl.access"] = (
+                f"user::rwx,user:{12345 + index}:r--,group::{mask},"
+                f"mask::{mask},other::---"
+            )
+            archive.addfile(entry)
+            payload = tarfile.TarInfo(f"file-{index}")
+            payload.size = 2
+            payload.uid, payload.gid = os.getuid(), os.getgid()
+            archive.addfile(payload, io.BytesIO(b"ok"))
+        with archive_path.open("rb") as source:
+            result = _run_helper(helper, ["apply-layer"], source.fileno(), root)
+        assert result.returncode == 0, result.stderr
+        info = root.stat()
+        assert info.st_mode & 0o777 == mode
+        assert (info.st_uid, info.st_gid) == (os.getuid(), os.getgid())
+        assert int(info.st_mtime) == timestamp
+        assert os.getxattr(root, "user.layer") == str(index).encode()
+        acl = os.getxattr(root, "system.posix_acl_access")
+        assert (2, 4, 12345 + index) in list(struct.iter_unpack("<HHI", acl[4:]))
+        assert (root / f"file-{index}").read_bytes() == b"ok"
+    assert (root / ".unroot" / "keep").read_text() == "metadata"
+
+
+@pytest.mark.parametrize("root_name,kind", [
+    (".", tarfile.REGTYPE),
+    *[(name, kind) for name in (".", "./", "././")
+      for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE)],
+])
+def test_oci_layer_rejects_non_directory_root_before_writing(
+    tmp_path: Path, root_name: str, kind: bytes
+) -> None:
+    helper = Path(__file__).parents[1] / "bin" / "unroot-util"
+    root = tmp_path / "root"
+    root.mkdir()
+    archive_path = tmp_path / "layer.tar"
+    with tarfile.open(archive_path, "w") as archive:
+        payload = tarfile.TarInfo("should-not-be-written")
+        archive.addfile(payload)
+        entry = tarfile.TarInfo(root_name)
+        entry.type = kind
+        if kind in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+            entry.linkname = "should-not-be-written"
+        archive.addfile(entry)
+    with archive_path.open("rb") as source:
+        result = _run_helper(helper, ["apply-layer"], source.fileno(), root)
+    assert result.returncode != 0
+    assert not list(root.iterdir())
+
+
+def test_oci_root_permissions_are_applied_after_children(tmp_path: Path) -> None:
+    helper = Path(__file__).parents[1] / "bin" / "unroot-util"
+    root = tmp_path / "root"
+    root.mkdir()
+    archive_path = tmp_path / "layer.tar"
+    with tarfile.open(archive_path, "w") as archive:
+        directory = tarfile.TarInfo("./")
+        directory.type = tarfile.DIRTYPE
+        directory.mode = 0o555
+        directory.uid, directory.gid = os.getuid(), os.getgid()
+        archive.addfile(directory)
+        payload = tarfile.TarInfo("child")
+        payload.uid, payload.gid = os.getuid(), os.getgid()
+        payload.size = 2
+        archive.addfile(payload, io.BytesIO(b"ok"))
+    try:
+        with archive_path.open("rb") as source:
+            result = _run_helper(helper, ["apply-layer"], source.fileno(), root)
+        assert result.returncode == 0, result.stderr
+        assert root.stat().st_mode & 0o777 == 0o555
+        assert (root / "child").read_bytes() == b"ok"
+    finally:
+        root.chmod(0o700)
 
 
 def _run_helper(
