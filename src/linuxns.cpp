@@ -32,11 +32,6 @@
 
 namespace {
 
-// Logging and step tracking toggles (env-driven)
-[[maybe_unused]] static bool envFlag(const char* name) {
-  const char* v = ::getenv(name);
-  return v && (*v == '1' || *v == 'y' || *v == 'Y' || *v == 't' || *v == 'T');
-}
 // Verbosity is evaluated dynamically (don't snapshot at static init; --debug sets
 // env vars later in main). 0=off,1=essential,2=all.
 static int currentVerboseLevel(){ const char* v = ::getenv("UNROOT_VERBOSE"); return (v && *v) ? std::atoi(v) : 0; }
