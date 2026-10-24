@@ -38,30 +38,4 @@ bool ToBeParsedArgs::is_action_help() const {
            std::find(args.begin(), end, "-h") != end;
 }
 
-std::string ToBeParsedArgs::to_string() const {
-    std::ostringstream oss;
-    oss << "ToBeParsedArgs{";
-    
-    if (action_name.has_value()) {
-        oss << "action='" << *action_name << "'";
-    } else {
-        oss << "action=null";
-    }
-    
-    oss << ", global_help=" << (is_global_help() ? "true" : "false");
-    oss << ", action_help=" << (is_action_help() ? "true" : "false");
-    
-    if (!args.empty()) {
-        oss << ", args=[";
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) oss << ", ";
-            oss << "'" << args[i] << "'";
-        }
-        oss << "]";
-    }
-    
-    oss << "}";
-    return oss.str();
-}
-
 } // namespace actions

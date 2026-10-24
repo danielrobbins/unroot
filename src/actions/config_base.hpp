@@ -70,14 +70,4 @@ private:
     mutable bool parser_configured_ = false;
 };
 
-// Base class for all filesystem operations
-class FilesystemConfig : public ActionConfig {
-public:
-    std::string root;
-    void validate() const override;
-
-protected:
-    void configure_parser() override;
-};
-
 } // namespace actions

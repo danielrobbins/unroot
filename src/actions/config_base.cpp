@@ -15,26 +15,6 @@
 
 namespace actions {
 
-// Helper function to get terminal width
-[[maybe_unused]] static int getTerminalWidth() {
-    // First try the COLUMNS environment variable
-    const char* cols_env = std::getenv("COLUMNS");
-    if (cols_env) {
-        int cols = std::atoi(cols_env);
-        if (cols > 0) {
-            return cols;
-        }
-    }
-    
-    // Then try ioctl
-    struct winsize w;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
-        return w.ws_col;
-    }
-    
-    return 80; // Default fallback width
-}
-
 // Helper function to wrap text to specified width with proper indentation
 [[maybe_unused]] static std::vector<std::string> wrapText(const std::string& text, int maxWidth, int indentSize) {
     std::vector<std::string> lines;
@@ -342,38 +322,6 @@ std::vector<Option> OptionParser::exportOptions() const {
         out.push_back(std::move(opt));
     }
     return out;
-}
-
-// FilesystemConfig implementation
-
-void FilesystemConfig::configure_parser() {
-    // Call parent implementation first
-    ActionConfig::configure_parser();
-    
-    // Add required --rootfs option for filesystem operations
-    parser_.add_option_meta({"--rootfs"}, "<path>", 
-        "Path to the root filesystem for namespace operations",
-        [this](const std::string& v) { 
-            this->root = v; 
-        }, 
-        /* required= */ true);
-}
-
-void FilesystemConfig::validate() const {
-    // Call base class validation
-    ActionConfig::validate();
-    
-    // Filesystem operations require a specific rootfs path
-    if (root.empty()) {
-        throw AppException(util::make_error(util::LibErr::Invalid, 0, 
-            "Filesystem operations require --rootfs parameter"), "usage");
-    }
-    
-    // Verify the rootfs path exists
-    if (!std::filesystem::exists(root)) {
-        throw AppException(util::make_error(util::LibErr::Invalid, 0, 
-            std::string("rootfs path does not exist: ") + root), "usage");
-    }
 }
 
 } // namespace actions

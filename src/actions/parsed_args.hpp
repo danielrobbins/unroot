@@ -33,8 +33,6 @@ struct ToBeParsedArgs {
     bool is_global_help() const;
     bool is_action_help() const;
     
-    // Debugging/logging
-    std::string to_string() const;
 };
 
 } // namespace actions
