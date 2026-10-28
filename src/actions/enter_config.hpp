@@ -45,6 +45,7 @@ public:
 
     void validateRootfs() const;
     void validateNamespace() const;
+    void validateMapSources() const;
     void analyzeArchitecture(const std::string& effectiveRoot = {});
     void resolveEnvironment();
     void resolveRelativePaths();

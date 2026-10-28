@@ -165,6 +165,9 @@ void EnterConfig::validate() const {
     
     // Use namespace validation  
     validateNamespace();
+
+    // A mapping must not bring the active rootfs back inside itself.
+    validateMapSources();
     
     // Enter-specific validation can go here
 }
@@ -219,6 +222,30 @@ void EnterConfig::validateNamespace() const {
         }
     }
     
+}
+
+void EnterConfig::validateMapSources() const {
+    std::error_code error;
+    const auto canonicalRoot = std::filesystem::canonical(root, error);
+    if (error) return;  // validateRootfs reports an unusable ROOT
+
+    for (const auto& map : maps) {
+        // A source that does not exist is reported when the mount is made.
+        const auto canonicalSource = std::filesystem::canonical(map.src, error);
+        if (error) continue;
+        // Equal paths give ".", and a ROOT beneath the source gives a path that
+        // does not start with "..". A sibling or a deeper source starts with "..".
+        const auto relative = canonicalRoot.lexically_relative(canonicalSource);
+        if (relative.empty() || *relative.begin() == "..") continue;
+        throw AppException(util::make_error(
+            util::LibErr::Invalid, 0,
+            "--map source " + canonicalSource.string() +
+                (relative == "." ? " is the active rootfs "
+                                 : " contains the active rootfs ") +
+                canonicalRoot.string() +
+                "; map a narrower path so the rootfs is not reachable from inside itself"),
+            "usage");
+    }
 }
 
 void EnterConfig::analyzeArchitecture(const std::string& effectiveRoot) {

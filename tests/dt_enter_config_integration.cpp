@@ -310,3 +310,93 @@ TEST_CASE("EnterConfig requires an absolute emulation reference") {
     cfg.parse(args);
     CHECK(cfg.emulationFor == "/bin/sh");
 }
+
+namespace {
+
+struct MappedRoots {
+    test::TempDirectory fixture;
+    std::filesystem::path base = fixture.root;
+    std::filesystem::path root = base / "roots" / "arch";
+    std::filesystem::path sibling = base / "roots" / "other";
+    std::filesystem::path unrelated = base / "elsewhere";
+
+    MappedRoots() {
+        for (const auto& path : {root, sibling, unrelated})
+            std::filesystem::create_directories(path);
+    }
+
+    static EnterConfig parse(const std::filesystem::path& root, const std::string& option,
+                             const std::filesystem::path& source) {
+        EnterConfig cfg;
+        ToBeParsedArgs args;
+        args.args = {root.string(), option, source.string(), "--", "/bin/sh"};
+        cfg.parse(args);
+        return cfg;
+    }
+
+    // True when validation refuses the mapping of SOURCE for ROOT.
+    static bool rejects(const std::filesystem::path& root, const std::string& option,
+                        const std::filesystem::path& source) {
+        auto cfg = parse(root, option, source);
+        try {
+            cfg.validate();
+        } catch (const AppException&) {
+            return true;
+        }
+        return false;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("EnterConfig rejects a mapping of the active rootfs or an ancestor") {
+    MappedRoots tree;
+    for (const std::string option : {"--map", "--map-ro"}) {
+        REQUIRE(MappedRoots::rejects(tree.root, option, tree.root));
+        REQUIRE(MappedRoots::rejects(tree.root, option, tree.root.parent_path()));
+        REQUIRE(MappedRoots::rejects(tree.root, option, tree.base));
+        REQUIRE(MappedRoots::rejects(tree.root, option, "/"));
+    }
+}
+
+TEST_CASE("EnterConfig names both paths when it rejects a mapping") {
+    MappedRoots tree;
+    auto cfg = MappedRoots::parse(tree.root, "--map", tree.base);
+    std::string message;
+    try {
+        cfg.validate();
+    } catch (const AppException& error) {
+        message = error.what();
+    }
+    REQUIRE(message.find(std::filesystem::canonical(tree.base).string()) != std::string::npos);
+    REQUIRE(message.find(std::filesystem::canonical(tree.root).string()) != std::string::npos);
+    REQUIRE(message.find("narrower") != std::string::npos);
+}
+
+TEST_CASE("EnterConfig rejects an alias of an ancestor of the rootfs") {
+    MappedRoots tree;
+    const auto alias = tree.unrelated / "alias";
+    std::filesystem::create_directory_symlink(tree.root.parent_path(), alias);
+    REQUIRE(MappedRoots::rejects(tree.root, "--map", alias));
+}
+
+TEST_CASE("EnterConfig rejects a mapping when ROOT is itself an alias") {
+    MappedRoots tree;
+    const auto alias = tree.unrelated / "root-alias";
+    std::filesystem::create_directory_symlink(tree.root, alias);
+    REQUIRE(MappedRoots::rejects(alias, "--map", tree.root.parent_path()));
+    REQUIRE(MappedRoots::rejects(alias, "--map-ro", tree.root));
+}
+
+TEST_CASE("EnterConfig still allows mappings that do not contain the rootfs") {
+    MappedRoots tree;
+    std::filesystem::create_directories(tree.root / "mnt");
+    for (const std::string option : {"--map", "--map-ro"}) {
+        // A sibling root, an unrelated directory, a directory inside the
+        // rootfs, and a path that does not exist yet.
+        CHECK_FALSE(MappedRoots::rejects(tree.root, option, tree.sibling));
+        CHECK_FALSE(MappedRoots::rejects(tree.root, option, tree.unrelated));
+        CHECK_FALSE(MappedRoots::rejects(tree.root, option, tree.root / "mnt"));
+        CHECK_FALSE(MappedRoots::rejects(tree.root, option, tree.base / "missing"));
+    }
+}
